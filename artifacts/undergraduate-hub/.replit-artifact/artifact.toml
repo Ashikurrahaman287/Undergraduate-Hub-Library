@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Undergraduate Hub"
+description = "A mobile-first book exchange and physical library management system for students in Dhaka, with member borrowing flows, staff operations, offline payment tracking, QR-ready inventory, and Bengali-English messaging."
+version = "1.0.0"
+id = "artifacts/undergraduate-hub"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22722
+
+[services.development]
+run = "pnpm --filter @workspace/undergraduate-hub run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/undergraduate-hub", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/undergraduate-hub/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22722"
+BASE_PATH = "/"

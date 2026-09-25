@@ -1,0 +1,1020 @@
+import { Router, type IRouter } from "express";
+import { and, asc, count, desc, eq, ilike, or, sql } from "drizzle-orm";
+import {
+  db,
+  booksTable,
+  borrowRequestsTable,
+  membersTable,
+  paymentsTable,
+  transactionsTable,
+  wishlistsTable,
+  notificationsTable,
+  auditLogsTable,
+  type Book,
+} from "@workspace/db";
+import { sendNotification } from "../services/notification-service";
+import {
+  CreateBookBody,
+  CreateBorrowRequestBody,
+  GetBookParams,
+  ListBooksQueryParams,
+  RecordPaymentBody,
+  UpdateBookBody,
+  UpdateBookParams,
+  UpdateBorrowRequestStatusBody,
+  UpdateBorrowRequestStatusParams,
+} from "@workspace/api-zod";
+
+const router: IRouter = Router();
+const DEMO_MEMBER_ID = "11111111-1111-4111-8111-111111111111";
+const BORROWING_DAYS = 7;
+const LATE_FEE_PER_DAY = 9;
+let seedPromise: Promise<void> | undefined;
+
+function money(value: string | number | null | undefined) {
+  return Number(value ?? 0);
+}
+
+function calculateLateFee(
+  dueDate: Date | string | null | undefined,
+  returnDate: Date | string | null | undefined = new Date(),
+) {
+  const effectiveReturnDate = returnDate ?? new Date();
+  if (!dueDate || effectiveReturnDate <= new Date(dueDate)) return 0;
+  const lateDays = Math.ceil(
+    (new Date(effectiveReturnDate).getTime() - new Date(dueDate).getTime()) / 86400000,
+  );
+  return Math.max(0, lateDays) * LATE_FEE_PER_DAY;
+}
+
+function addBorrowingDays(dateValue: Date) {
+  const dueDate = new Date(dateValue);
+  dueDate.setDate(dueDate.getDate() + BORROWING_DAYS);
+  return dueDate;
+}
+
+function slotToTime(slot: string) {
+  const firstPart = slot.split(/[–-]/)[0]?.trim() ?? "";
+  const match = firstPart.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = match[2];
+  const meridiem = match[3]?.toUpperCase();
+  if (meridiem === "PM" && hour < 12) hour += 12;
+  if (meridiem === "AM" && hour === 12) hour = 0;
+  return `${String(hour).padStart(2, "0")}:${minute}`;
+}
+
+function mapMember(member: typeof membersTable.$inferSelect) {
+  return {
+    id: member.id,
+    authUserId: member.authUserId,
+    name: member.name,
+    email: member.email,
+    phone: member.phone,
+    university: member.university,
+    studentId: member.studentId,
+    plan: member.plan,
+    subscriptionPlan: money(member.subscriptionPlan),
+    subscriptionStart: member.subscriptionStart,
+    subscriptionEnd: member.subscriptionEnd,
+    depositAmount: money(member.depositAmount),
+    depositStatus: member.depositStatus,
+    outstandingFees: money(member.outstandingFees),
+    status: member.status,
+    totalBooksRead: money(member.totalBooksRead),
+    joinedAt: member.joinedAt.toISOString(),
+  };
+}
+
+function mapBorrowRequest(
+  request: typeof borrowRequestsTable.$inferSelect,
+  bookTitle: string,
+  memberName: string,
+  member?: typeof membersTable.$inferSelect | null,
+  transaction?: typeof transactionsTable.$inferSelect | null,
+) {
+  return {
+    id: request.id,
+    bookId: request.bookId,
+    bookTitle,
+    memberName,
+    memberPhone: member?.phone ?? null,
+    university: member?.university ?? null,
+    depositStatus: member?.depositStatus ?? null,
+    subscriptionStatus:
+      member?.subscriptionEnd && member.subscriptionEnd >= new Date().toISOString().slice(0, 10)
+        ? "active"
+        : "expired",
+    approvedPickupDate: transaction?.approvedPickupDate ?? null,
+    approvedPickupTime: transaction?.approvedPickupTime ?? null,
+    pickupDate: request.pickupDate,
+    pickupSlot: request.pickupSlot,
+    status: request.status,
+    note: request.note,
+    dueDate: request.dueDate,
+    lateFee: calculateLateFee(transaction?.dueDate ?? request.dueDate, transaction?.returnDate),
+    createdAt: request.createdAt.toISOString(),
+  };
+}
+
+async function recordAudit(action: string, entityType: string, entityId: string, metadata?: Record<string, unknown>) {
+  await db.insert(auditLogsTable).values({
+    action,
+    entityType,
+    entityId,
+    metadata: metadata ? JSON.stringify(metadata) : null,
+  });
+}
+
+function mapBook(book: Book) {
+  return {
+    ...book,
+    price: money(book.price),
+    depositAmount: money(book.depositAmount),
+    createdAt: book.createdAt.toISOString(),
+    updatedAt: book.updatedAt.toISOString(),
+  };
+}
+
+async function ensureSeedData() {
+  if (!seedPromise) {
+    seedPromise = (async () => {
+      const existing = await db
+        .select({ id: membersTable.id })
+        .from(membersTable)
+        .where(eq(membersTable.id, DEMO_MEMBER_ID))
+        .limit(1);
+      if (existing.length) {
+        await db
+          .update(membersTable)
+          .set({
+            university: "BRAC",
+            subscriptionPlan: "29",
+            subscriptionStart: "2026-09-01",
+            subscriptionEnd: "2026-09-30",
+            depositAmount: "300",
+            depositStatus: "paid",
+            status: "active",
+            updatedAt: new Date(),
+          })
+          .where(eq(membersTable.id, DEMO_MEMBER_ID));
+        const [existingActiveTransaction] = await db
+          .select({ id: transactionsTable.id })
+          .from(transactionsTable)
+          .where(
+            and(
+              eq(transactionsTable.memberId, DEMO_MEMBER_ID),
+              or(
+                eq(transactionsTable.status, "approved"),
+                eq(transactionsTable.status, "borrowed"),
+                eq(transactionsTable.status, "overdue"),
+              ),
+            ),
+          )
+          .limit(1);
+        const [activeRequest] = existingActiveTransaction
+          ? [undefined]
+          : await db
+              .select({ request: borrowRequestsTable, book: booksTable })
+              .from(borrowRequestsTable)
+              .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
+              .where(
+                and(
+                  eq(borrowRequestsTable.memberId, DEMO_MEMBER_ID),
+                  or(
+                    eq(borrowRequestsTable.status, "approved"),
+                    eq(borrowRequestsTable.status, "collected"),
+                  ),
+                ),
+              )
+              .limit(1);
+        if (activeRequest && !activeRequest.request.transactionId) {
+          const borrowDate = new Date("2026-09-21T17:00:00+06:00");
+          const [transaction] = await db
+            .insert(transactionsTable)
+            .values({
+              memberId: DEMO_MEMBER_ID,
+              bookId: activeRequest.book.id,
+              requestedPickupDate: activeRequest.request.pickupDate,
+              requestedPickupTime: slotToTime(activeRequest.request.pickupSlot),
+              borrowDate,
+              dueDate: addBorrowingDays(borrowDate),
+              status: "borrowed",
+            })
+            .returning();
+          await db
+            .update(borrowRequestsTable)
+            .set({ transactionId: transaction.id, updatedAt: new Date() })
+            .where(eq(borrowRequestsTable.id, activeRequest.request.id));
+        }
+        return;
+      }
+
+      await db.insert(membersTable).values({
+        id: DEMO_MEMBER_ID,
+        name: "Nusrat Jahan",
+        email: "nusrat@undergraduatehub.bd",
+        phone: "+880 1712-345678",
+        university: "BRAC",
+        studentId: "BRACU-2026-0142",
+        subscriptionPlan: "29",
+        subscriptionStart: "2026-09-01",
+        subscriptionEnd: "2026-09-30",
+        plan: "Semester Pass",
+        depositStatus: "paid",
+        status: "active",
+        outstandingFees: "80",
+        depositAmount: "300",
+      });
+
+      const seededBooks = await db
+        .insert(booksTable)
+        .values([
+          {
+            title: "পথের পাঁচালী",
+            author: "বিভূতিভূষণ বন্দ্যোপাধ্যায়",
+            category: "Novel",
+            language: "Bangla",
+            qrCode: "UH-BOOK-001",
+            price: "420",
+            conditionNote: "Good condition",
+          },
+          {
+            title: "Atomic Habits",
+            author: "James Clear",
+            category: "Self-Help",
+            language: "English",
+            qrCode: "UH-BOOK-002",
+            price: "650",
+            conditionNote: "Like new",
+          },
+          {
+            title: "Sapiens",
+            author: "Yuval Noah Harari",
+            category: "History",
+            language: "English",
+            qrCode: "UH-BOOK-003",
+            price: "780",
+            status: "rented",
+            conditionNote: "Good condition",
+          },
+          {
+            title: "The Alchemist",
+            author: "Paulo Coelho",
+            category: "Novel",
+            language: "English",
+            qrCode: "UH-BOOK-004",
+            price: "500",
+            conditionNote: "Good condition",
+          },
+          {
+            title: "জীবন ও রাজনীতি",
+            author: "আনিসুজ্জামান",
+            category: "Philosophy",
+            language: "Bangla",
+            qrCode: "UH-BOOK-005",
+            price: "350",
+            conditionNote: "Marked pages",
+          },
+          {
+            title: "Dune",
+            author: "Frank Herbert",
+            category: "Sci-Fi",
+            language: "English",
+            qrCode: "UH-BOOK-006",
+            price: "720",
+            conditionNote: "Like new",
+          },
+        ])
+        .returning();
+
+      const activeBook = seededBooks.find((book) => book.status === "rented");
+      const upcomingBook = seededBooks.find((book) => book.status === "available");
+      if (activeBook && upcomingBook) {
+        const seededRequests = await db.insert(borrowRequestsTable).values([
+          {
+            bookId: activeBook.id,
+            memberId: DEMO_MEMBER_ID,
+            pickupDate: "2026-09-10",
+            pickupSlot: "5:00 PM – 6:00 PM",
+            status: "collected",
+            dueDate: "2026-09-28",
+          },
+          {
+            bookId: upcomingBook.id,
+            memberId: DEMO_MEMBER_ID,
+            pickupDate: "2026-09-24",
+            pickupSlot: "3:00 PM – 4:00 PM",
+            status: "pending",
+            note: "Please keep it aside under my name.",
+          },
+        ]).returning();
+        await db.insert(transactionsTable).values({
+          memberId: DEMO_MEMBER_ID,
+          bookId: activeBook.id,
+          requestedPickupDate: "2026-09-10",
+          requestedPickupTime: "17:00",
+          approvedPickupDate: "2026-09-10",
+          approvedPickupTime: "17:00",
+          borrowDate: new Date("2026-09-21T17:00:00+06:00"),
+          dueDate: new Date("2026-09-28T17:00:00+06:00"),
+          status: "borrowed",
+          staffNote: seededRequests[0]?.id ? "Seeded active loan" : null,
+        });
+      }
+
+      await db.insert(paymentsTable).values({
+        memberId: DEMO_MEMBER_ID,
+        amount: "1200",
+        method: "bkash",
+        type: "subscription",
+        referenceNumber: "BKX-2026-0912",
+        status: "paid",
+      });
+    })().catch((error) => {
+      seedPromise = undefined;
+      throw error;
+    });
+  }
+  return seedPromise;
+}
+
+router.get("/dashboard", async (_req, res) => {
+  await ensureSeedData();
+  const [member] = await db
+    .select()
+    .from(membersTable)
+    .where(eq(membersTable.id, DEMO_MEMBER_ID))
+    .limit(1);
+  const active = await db
+    .select({ request: borrowRequestsTable, book: booksTable })
+    .from(borrowRequestsTable)
+    .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
+    .where(
+      and(
+        eq(borrowRequestsTable.memberId, DEMO_MEMBER_ID),
+        or(
+          eq(borrowRequestsTable.status, "collected"),
+          eq(borrowRequestsTable.status, "approved"),
+        ),
+      ),
+    )
+    .orderBy(desc(borrowRequestsTable.createdAt))
+    .limit(1);
+  const pending = await db
+    .select({ count: count() })
+    .from(borrowRequestsTable)
+    .where(
+      and(
+        eq(borrowRequestsTable.memberId, DEMO_MEMBER_ID),
+        eq(borrowRequestsTable.status, "pending"),
+      ),
+    );
+  const [activeTransaction] = await db
+    .select()
+    .from(transactionsTable)
+    .where(
+      and(
+        eq(transactionsTable.memberId, DEMO_MEMBER_ID),
+        or(
+          eq(transactionsTable.status, "approved"),
+          eq(transactionsTable.status, "borrowed"),
+          eq(transactionsTable.status, "overdue"),
+        ),
+      ),
+    )
+    .orderBy(desc(transactionsTable.createdAt))
+    .limit(1);
+  const memberNotifications = await db
+    .select()
+    .from(notificationsTable)
+    .where(eq(notificationsTable.memberId, DEMO_MEMBER_ID))
+    .orderBy(desc(notificationsTable.createdAt))
+    .limit(3);
+  const activeItem = active[0];
+  const dueDate = activeItem?.request.dueDate ?? "2026-09-28";
+  const dueInDays = Math.max(
+    0,
+    Math.ceil((new Date(`${dueDate}T23:59:59`).getTime() - Date.now()) / 86400000),
+  );
+  res.json({
+    memberName: member?.name ?? "Nusrat Jahan",
+    activeBook: activeItem
+      ? {
+          title: activeItem.book.title,
+          author: activeItem.book.author,
+          dueDate,
+          daysLeft: dueInDays,
+          coverUrl: activeItem.book.coverUrl,
+        }
+      : null,
+    dueInDays,
+    pendingRequests: Number(pending[0]?.count ?? 0),
+    wishlistCount: 4,
+    outstandingFees:
+      money(member?.outstandingFees) +
+      calculateLateFee(activeTransaction?.dueDate, activeTransaction?.returnDate),
+    notifications: memberNotifications.length
+      ? memberNotifications.map((notification) => notification.message)
+      : [
+          "আপনার পরবর্তী pickup slot বৃহস্পতিবার, 3:00 PM – 4:00 PM।",
+          "লাইব্রেরি শুক্রবার দুপুর ২টা পর্যন্ত খোলা থাকবে।",
+        ],
+  });
+});
+
+router.get("/books", async (req, res) => {
+  await ensureSeedData();
+  const params = ListBooksQueryParams.parse(req.query);
+  const filters = [];
+  if (params.search) {
+    filters.push(
+      or(ilike(booksTable.title, `%${params.search}%`), ilike(booksTable.author, `%${params.search}%`)),
+    );
+  }
+  if (params.category) filters.push(eq(booksTable.category, params.category));
+  if (params.language) filters.push(eq(booksTable.language, params.language));
+  if (params.status) filters.push(eq(booksTable.status, params.status as "available" | "rented" | "lost"));
+  const orderBy =
+    params.sort === "recent"
+      ? desc(booksTable.createdAt)
+      : params.sort === "popular"
+        ? desc(booksTable.price)
+        : asc(booksTable.title);
+  const books = await db
+    .select()
+    .from(booksTable)
+    .where(filters.length ? and(...filters) : undefined)
+    .orderBy(orderBy)
+    .limit(params.pageSize)
+    .offset((params.page - 1) * params.pageSize);
+  res.json(books.map(mapBook));
+});
+
+router.post("/books", async (req, res) => {
+  const body = CreateBookBody.parse(req.body);
+  const [book] = await db
+    .insert(booksTable)
+    .values({
+      ...body,
+      qrCode: `UH-${Date.now()}`,
+      price: String(body.price ?? 0),
+      depositAmount: String(body.depositAmount ?? 300),
+    })
+    .returning();
+  res.status(201).json(mapBook(book));
+});
+
+router.get("/books/:id", async (req, res) => {
+  await ensureSeedData();
+  const { id } = GetBookParams.parse(req.params);
+  const [book] = await db.select().from(booksTable).where(eq(booksTable.id, id)).limit(1);
+  if (!book) {
+    res.status(404).json({ error: "Book not found" });
+    return;
+  }
+  res.json(mapBook(book));
+});
+
+router.patch("/books/:id", async (req, res) => {
+  const { id } = UpdateBookParams.parse(req.params);
+  const body = UpdateBookBody.parse(req.body);
+  const [book] = await db
+    .update(booksTable)
+    .set({
+      title: body.title,
+      author: body.author,
+      category: body.category,
+      language: body.language,
+      status: body.status as "available" | "rented" | "lost" | undefined,
+      conditionNote: body.conditionNote,
+      depositRequired: body.depositRequired,
+      price: body.price === undefined ? undefined : String(body.price),
+      depositAmount:
+        body.depositAmount === undefined ? undefined : String(body.depositAmount),
+      updatedAt: new Date(),
+    })
+    .where(eq(booksTable.id, id))
+    .returning();
+  if (!book) {
+    res.status(404).json({ error: "Book not found" });
+    return;
+  }
+  res.json(mapBook(book));
+});
+
+router.get("/requests", async (_req, res) => {
+  await ensureSeedData();
+  const requests = await db
+    .select({
+      request: borrowRequestsTable,
+      book: booksTable,
+      member: membersTable,
+      transaction: transactionsTable,
+    })
+    .from(borrowRequestsTable)
+    .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
+    .innerJoin(membersTable, eq(borrowRequestsTable.memberId, membersTable.id))
+    .leftJoin(transactionsTable, eq(borrowRequestsTable.transactionId, transactionsTable.id))
+    .orderBy(desc(borrowRequestsTable.createdAt));
+  res.json(
+    requests.map(({ request, book, member, transaction }) =>
+      mapBorrowRequest(request, book.title, member.name, member, transaction),
+    ),
+  );
+});
+
+router.get("/my-books", async (_req, res) => {
+  await ensureSeedData();
+  const rows = await db
+    .select({ transaction: transactionsTable, book: booksTable })
+    .from(transactionsTable)
+    .innerJoin(booksTable, eq(transactionsTable.bookId, booksTable.id))
+    .where(
+      and(
+        eq(transactionsTable.memberId, DEMO_MEMBER_ID),
+        or(
+          eq(transactionsTable.status, "approved"),
+          eq(transactionsTable.status, "borrowed"),
+          eq(transactionsTable.status, "overdue"),
+        ),
+      ),
+    )
+    .orderBy(desc(transactionsTable.createdAt));
+  res.json(
+    rows.map(({ transaction, book }) => {
+      const dueDate = transaction.dueDate;
+      const lateFee = calculateLateFee(dueDate, transaction.returnDate);
+      const daysRemaining = dueDate
+        ? Math.ceil((new Date(dueDate).getTime() - Date.now()) / 86400000)
+        : 0;
+      return {
+        transactionId: transaction.id,
+        bookId: book.id,
+        title: book.title,
+        author: book.author,
+        coverUrl: book.coverUrl,
+        borrowDate: transaction.borrowDate?.toISOString() ?? null,
+        dueDate: dueDate?.toISOString() ?? null,
+        returnDate: transaction.returnDate?.toISOString() ?? null,
+        status: transaction.status,
+        lateFee,
+        daysRemaining,
+      };
+    }),
+  );
+});
+
+router.get("/wishlist", async (_req, res) => {
+  await ensureSeedData();
+  const rows = await db
+    .select({ book: booksTable })
+    .from(wishlistsTable)
+    .innerJoin(booksTable, eq(wishlistsTable.bookId, booksTable.id))
+    .where(eq(wishlistsTable.memberId, DEMO_MEMBER_ID))
+    .orderBy(desc(wishlistsTable.createdAt));
+  res.json(rows.map(({ book }) => mapBook(book)));
+});
+
+router.post("/wishlist", async (req, res) => {
+  await ensureSeedData();
+  const bookId = String(req.body?.bookId ?? "");
+  const [book] = await db.select().from(booksTable).where(eq(booksTable.id, bookId)).limit(1);
+  if (!book) {
+    res.status(404).json({ error: "Book not found" });
+    return;
+  }
+  const existing = await db
+    .select({ id: wishlistsTable.id })
+    .from(wishlistsTable)
+    .where(and(eq(wishlistsTable.memberId, DEMO_MEMBER_ID), eq(wishlistsTable.bookId, bookId)))
+    .limit(1);
+  if (!existing.length) {
+    await db.insert(wishlistsTable).values({ memberId: DEMO_MEMBER_ID, bookId });
+  }
+  res.status(201).json(mapBook(book));
+});
+
+router.delete("/wishlist/:bookId", async (req, res) => {
+  await db
+    .delete(wishlistsTable)
+    .where(and(eq(wishlistsTable.memberId, DEMO_MEMBER_ID), eq(wishlistsTable.bookId, req.params.bookId)));
+  res.status(204).send();
+});
+
+router.get("/notifications", async (_req, res) => {
+  await ensureSeedData();
+  const notifications = await db
+    .select()
+    .from(notificationsTable)
+    .where(eq(notificationsTable.memberId, DEMO_MEMBER_ID))
+    .orderBy(desc(notificationsTable.createdAt))
+    .limit(30);
+  res.json(
+    notifications.map((notification) => ({
+      id: notification.id,
+      title: notification.title,
+      message: notification.message,
+      type: notification.type,
+      isRead: notification.isRead,
+      createdAt: notification.createdAt.toISOString(),
+    })),
+  );
+});
+
+router.patch("/notifications/:id/read", async (req, res) => {
+  await db
+    .update(notificationsTable)
+    .set({ isRead: true })
+    .where(
+      and(
+        eq(notificationsTable.id, req.params.id),
+        eq(notificationsTable.memberId, DEMO_MEMBER_ID),
+      ),
+    );
+  res.status(204).send();
+});
+
+router.post("/requests", async (req, res) => {
+  await ensureSeedData();
+  const body = CreateBorrowRequestBody.parse(req.body);
+  const [member] = await db
+    .select()
+    .from(membersTable)
+    .where(eq(membersTable.id, DEMO_MEMBER_ID))
+    .limit(1);
+  const today = new Date().toISOString().slice(0, 10);
+  if (
+    !member ||
+    member.status !== "active" ||
+    !member.subscriptionEnd ||
+    member.subscriptionEnd < today
+  ) {
+    res.status(400).json({
+      error: "আপনার subscription মেয়াদ শেষ হয়েছে। নতুন বই নিতে আগে subscription renew করুন।",
+      code: "SUBSCRIPTION_EXPIRED",
+    });
+    return;
+  }
+
+  const [book] = await db
+    .select()
+    .from(booksTable)
+    .where(eq(booksTable.id, body.bookId))
+    .limit(1);
+  if (!book) {
+    res.status(404).json({ error: "Book not found", code: "BOOK_NOT_FOUND" });
+    return;
+  }
+  if (book.status !== "available") {
+    res.status(409).json({
+      error: "এই বইটি এখন available নয়। অন্য একটি বই বেছে নিন।",
+      code: "BOOK_NOT_AVAILABLE",
+    });
+    return;
+  }
+  if (
+    book.depositRequired &&
+    member.depositStatus !== "paid" &&
+    member.depositStatus !== "waived"
+  ) {
+    res.status(400).json({
+      error: `এই বইটির জন্য ৳${money(book.depositAmount)} deposit প্রয়োজন। আগে deposit পরিশোধ করুন।`,
+      code: "DEPOSIT_REQUIRED",
+    });
+    return;
+  }
+
+  const activeBorrow = await db
+    .select({ id: transactionsTable.id })
+    .from(transactionsTable)
+    .where(
+      and(
+        eq(transactionsTable.memberId, DEMO_MEMBER_ID),
+        or(
+          eq(transactionsTable.status, "approved"),
+          eq(transactionsTable.status, "borrowed"),
+          eq(transactionsTable.status, "overdue"),
+        ),
+      ),
+    )
+    .limit(1);
+  if (activeBorrow.length) {
+    res.status(409).json({
+      error: "আপনার কাছে ইতোমধ্যে একটি বই আছে। বইটি ফেরত দেওয়ার পর নতুন বই নিতে পারবেন।",
+      code: "ACTIVE_BORROW_EXISTS",
+    });
+    return;
+  }
+
+  const [transaction] = await db
+    .insert(transactionsTable)
+    .values({
+      memberId: DEMO_MEMBER_ID,
+      bookId: body.bookId,
+      requestedPickupDate: body.pickupDate,
+      requestedPickupTime: slotToTime(body.pickupSlot),
+      status: "requested",
+    })
+    .returning();
+  const [request] = await db
+    .insert(borrowRequestsTable)
+    .values({ ...body, memberId: DEMO_MEMBER_ID, transactionId: transaction.id })
+    .returning();
+  res
+    .status(201)
+    .json(mapBorrowRequest(request, book?.title ?? "Book", member.name, member, transaction));
+});
+
+router.patch("/requests/:id/status", async (req, res) => {
+  const { id } = UpdateBorrowRequestStatusParams.parse(req.params);
+  const body = UpdateBorrowRequestStatusBody.parse(req.body);
+  if (body.status === "rejected" && !body.note?.trim()) {
+    res.status(400).json({ error: "Rejection reason is required." });
+    return;
+  }
+  const [request] = await db
+    .update(borrowRequestsTable)
+    .set({
+      status: body.status as
+        | "pending"
+        | "approved"
+        | "rejected"
+        | "rescheduled"
+        | "collected"
+        | "returned",
+      pickupDate: body.pickupDate ?? undefined,
+      pickupSlot: body.pickupSlot ?? undefined,
+      dueDate: body.dueDate ?? undefined,
+      note: body.note ?? undefined,
+    })
+    .where(eq(borrowRequestsTable.id, id))
+    .returning();
+  if (!request) {
+    res.status(404).json({ error: "Request not found" });
+    return;
+  }
+  if (request.transactionId) {
+    const now = new Date();
+    const transactionStatus =
+      body.status === "rescheduled"
+        ? "approved"
+        : body.status === "collected"
+          ? "borrowed"
+          : body.status === "pending"
+            ? "requested"
+            : body.status;
+    const transactionUpdate: Partial<typeof transactionsTable.$inferInsert> = {
+      status: transactionStatus as
+        | "requested"
+        | "approved"
+        | "rejected"
+        | "borrowed"
+        | "returned"
+        | "overdue"
+        | "cancelled",
+      approvedPickupDate:
+        body.status === "approved" || body.status === "rescheduled"
+          ? request.pickupDate
+          : undefined,
+      approvedPickupTime:
+        body.status === "approved" || body.status === "rescheduled"
+          ? slotToTime(request.pickupSlot)
+          : undefined,
+      borrowDate:
+        body.status === "collected" || body.status === "borrowed" ? now : undefined,
+      dueDate:
+        body.status === "collected" || body.status === "borrowed"
+          ? addBorrowingDays(now)
+          : undefined,
+      returnDate: body.status === "returned" ? now : undefined,
+      lateFee:
+        body.status === "returned"
+          ? String(calculateLateFee(request.dueDate, now))
+          : undefined,
+      rejectionReason: body.status === "rejected" ? body.note ?? undefined : undefined,
+      updatedAt: now,
+    };
+    await db
+      .update(transactionsTable)
+      .set(transactionUpdate)
+      .where(eq(transactionsTable.id, request.transactionId));
+    if (body.status === "collected") {
+      await db
+        .update(booksTable)
+        .set({ status: "rented", updatedAt: now })
+        .where(eq(booksTable.id, request.bookId));
+    }
+    if (body.status === "returned") {
+      await db
+        .update(booksTable)
+        .set({ status: "available", updatedAt: now })
+        .where(eq(booksTable.id, request.bookId));
+    }
+    const [memberForNotification] = await db
+      .select()
+      .from(membersTable)
+      .where(eq(membersTable.id, request.memberId))
+      .limit(1);
+    if (memberForNotification && body.status === "approved") {
+      await sendNotification({
+        memberId: memberForNotification.id,
+        title: "বই নেওয়ার অনুরোধ অনুমোদিত",
+        message: "আপনার বই নেওয়ার অনুরোধটি অনুমোদিত হয়েছে।",
+        type: "request_approved",
+      });
+    }
+    if (memberForNotification && body.status === "rescheduled") {
+      await sendNotification({
+        memberId: memberForNotification.id,
+        title: "Pickup সময় পরিবর্তন হয়েছে",
+        message: `আপনার বই নেওয়ার সময় পরিবর্তন করা হয়েছে। নতুন সময়: ${request.pickupDate}, ${request.pickupSlot}`,
+        type: "request_rescheduled",
+      });
+    }
+  }
+  await recordAudit(`request_${body.status}`, "borrow_request", request.id, {
+    note: body.note ?? null,
+  });
+  const [book] = await db.select().from(booksTable).where(eq(booksTable.id, request.bookId));
+  const [member] = await db
+    .select()
+    .from(membersTable)
+    .where(eq(membersTable.id, request.memberId))
+    .limit(1);
+  const [transaction] = request.transactionId
+    ? await db
+        .select()
+        .from(transactionsTable)
+        .where(eq(transactionsTable.id, request.transactionId))
+        .limit(1)
+    : [undefined];
+  res.json(
+    mapBorrowRequest(
+      request,
+      book?.title ?? "Book",
+      member?.name ?? "Member",
+      member,
+      transaction,
+    ),
+  );
+});
+
+router.get("/members", async (_req, res) => {
+  await ensureSeedData();
+  const members = await db.select().from(membersTable).orderBy(asc(membersTable.name));
+  res.json(members.map(mapMember));
+});
+
+router.post("/members", async (req, res) => {
+  const body = req.body as {
+    name: string;
+    email?: string | null;
+    phone: string;
+    university: string;
+    studentId?: string | null;
+    subscriptionPlan?: number;
+  };
+  if (!body.name?.trim() || !body.phone?.trim() || !body.university?.trim()) {
+    res.status(400).json({ error: "Name, phone, and university are required." });
+    return;
+  }
+  const [{ count: memberCount }] = await db
+    .select({ count: count() })
+    .from(membersTable);
+  const plan = body.subscriptionPlan ?? (Number(memberCount) < 100 ? 29 : 49);
+  const [member] = await db
+    .insert(membersTable)
+    .values({
+      name: body.name.trim(),
+      email: body.email ?? null,
+      phone: body.phone.trim(),
+      university: body.university.trim(),
+      studentId: body.studentId ?? null,
+      subscriptionPlan: String(plan),
+      subscriptionStart: new Date().toISOString().slice(0, 10),
+      subscriptionEnd: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+      plan: `${plan} BDT`,
+    })
+    .returning();
+  res.status(201).json(mapMember(member));
+});
+
+router.patch("/members/:id", async (req, res) => {
+  const body = req.body as {
+    name?: string;
+    email?: string | null;
+    phone?: string;
+    university?: string;
+    studentId?: string | null;
+    subscriptionPlan?: number;
+    subscriptionStart?: string | null;
+    subscriptionEnd?: string | null;
+    depositStatus?: string;
+    status?: string;
+  };
+  const [member] = await db
+    .update(membersTable)
+    .set({
+      name: body.name,
+      email: body.email,
+      phone: body.phone,
+      university: body.university,
+      studentId: body.studentId,
+      subscriptionPlan:
+        body.subscriptionPlan === undefined ? undefined : String(body.subscriptionPlan),
+      subscriptionStart: body.subscriptionStart,
+      subscriptionEnd: body.subscriptionEnd,
+      depositStatus: body.depositStatus,
+      status: body.status,
+      plan:
+        body.subscriptionPlan === undefined ? undefined : `${body.subscriptionPlan} BDT`,
+      updatedAt: new Date(),
+    })
+    .where(eq(membersTable.id, req.params.id))
+    .returning();
+  if (!member) {
+    res.status(404).json({ error: "Member not found" });
+    return;
+  }
+  res.json(mapMember(member));
+});
+
+router.get("/payments", async (_req, res) => {
+  await ensureSeedData();
+  const payments = await db
+    .select({ payment: paymentsTable, member: membersTable })
+    .from(paymentsTable)
+    .innerJoin(membersTable, eq(paymentsTable.memberId, membersTable.id))
+    .orderBy(desc(paymentsTable.paidAt));
+  res.json(
+    payments.map(({ payment, member }) => ({
+      id: payment.id,
+      memberName: member.name,
+      amount: money(payment.amount),
+      method: payment.method,
+      type: payment.type,
+      status: payment.status,
+      reference: payment.referenceNumber,
+      transactionId: payment.transactionId,
+      paidAt: payment.paidAt.toISOString(),
+    })),
+  );
+});
+
+router.post("/payments", async (req, res) => {
+  await ensureSeedData();
+  const body = RecordPaymentBody.parse(req.body);
+  const [payment] = await db
+    .insert(paymentsTable)
+    .values({
+      memberId: body.memberId,
+      amount: String(body.amount),
+      method: body.method as "cash" | "bkash" | "nagad",
+      type: body.type,
+      referenceNumber: body.reference,
+    })
+    .returning();
+  const [member] = await db.select().from(membersTable).where(eq(membersTable.id, body.memberId));
+  res.status(201).json({
+    id: payment.id,
+    memberName: member?.name ?? "Member",
+    amount: money(payment.amount),
+    method: payment.method,
+    type: payment.type,
+    status: payment.status,
+      reference: payment.referenceNumber,
+    paidAt: payment.paidAt.toISOString(),
+  });
+});
+
+router.get("/analytics", async (_req, res) => {
+  await ensureSeedData();
+  const [books, members, requests] = await Promise.all([
+    db.select({ status: booksTable.status, count: count() }).from(booksTable).groupBy(booksTable.status),
+    db.select({ count: count() }).from(membersTable),
+    db
+      .select({ count: count() })
+      .from(borrowRequestsTable)
+      .where(eq(borrowRequestsTable.status, "pending")),
+  ]);
+  const byStatus = new Map(books.map((entry) => [entry.status, Number(entry.count)]));
+  res.json({
+    totalBooks: Array.from(byStatus.values()).reduce((sum, value) => sum + value, 0),
+    availableBooks: byStatus.get("available") ?? 0,
+    borrowedBooks: byStatus.get("rented") ?? 0,
+    activeMembers: Number(members[0]?.count ?? 0),
+    pendingRequests: Number(requests[0]?.count ?? 0),
+    monthlyBorrowing: [
+      { month: "Apr", count: 12 },
+      { month: "May", count: 18 },
+      { month: "Jun", count: 14 },
+      { month: "Jul", count: 22 },
+      { month: "Aug", count: 26 },
+      { month: "Sep", count: 19 },
+    ],
+  });
+});
+
+export default router;

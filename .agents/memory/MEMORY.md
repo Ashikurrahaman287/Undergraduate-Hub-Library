@@ -1,0 +1,1 @@
+- [Supabase production boundary](supabase-dev-boundary.md) — local development stays credential-free while hosted auth/RLS follows the Supabase migration.
