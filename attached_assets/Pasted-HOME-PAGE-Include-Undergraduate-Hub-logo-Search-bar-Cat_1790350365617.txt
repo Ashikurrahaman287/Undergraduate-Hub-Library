@@ -1,0 +1,157 @@
+HOME PAGE
+Include:
+Undergraduate Hub logo
+Search bar
+Categories
+Language filter
+Available-only filter
+Book grid
+Featured books
+Recently added books
+Popular books
+Wishlist indicator
+The system should support approximately 1200+ books without loading all heavy data at once.
+Use:
+pagination
+  OR
+infinite scrolling
+  OR
+server-side pagination
+Do NOT render 1200 large images simultaneously.
+Use optimized Next.js image loading.
+---
+BOOK CARD
+Each card should show:
+Cover
+Title
+Author
+Category
+Language
+Availability
+Status examples:
+🟢 Available
+🔴 Rented
+⚠️ Lost
+Buttons:
+View Details
+Wishlist
+---
+BOOK DETAILS PAGE
+Route:
+/books/[id]
+Show:
+Large cover
+Title
+Author
+Category
+Language
+Description/condition note
+Availability
+Deposit requirement
+Deposit amount
+Current status
+If rented:
+Show:
+"Currently rented"
+and expected return date if available.
+If available:
+Show:
+"বই ধার নিন"
+---
+11. BORROW REQUEST FLOW
+When a logged-in member clicks:
+Borrow Book
+Open a form.
+Member must provide:
+Preferred pickup date
+Preferred pickup time
+Optional note
+Before submitting, check:
+Subscription active?
+Existing active book?
+Book available?
+Deposit requirement?
+Member account active?
+If valid:
+Create borrow request.
+Show:
+"আপনার বই নেওয়ার অনুরোধটি পাঠানো হয়েছে। Admin অনুমোদন করলে আপনাকে জানানো হবে।"
+Request status:
+Pending
+Approved
+Rejected
+Rescheduled
+Cancelled
+---
+12. ADMIN BORROW APPROVAL
+Admin sees pending requests.
+For each request:
+Member
+Phone
+University
+Book
+Requested pickup date
+Requested pickup time
+Deposit status
+Subscription status
+Actions:
+Approve
+Admin can:
+approve requested date/time
+  OR
+select another date/time
+Reschedule
+Admin can change:
+pickup date
+pickup time
+Reject
+Admin must provide reason.
+After approval:
+Transaction becomes approved
+Member receives notification
+Member sees approved pickup time
+---
+13. NOTIFICATIONS
+Implement an internal notification system.
+When Admin approves:
+"আপনার বই নেওয়ার অনুরোধটি অনুমোদিত হয়েছে।"
+When Admin reschedules:
+"আপনার বই নেওয়ার সময় পরিবর্তন করা হয়েছে। নতুন সময়: ..."
+When book is approaching due date:
+"আপনার বই ফেরত দেওয়ার সময় খুব কাছে।"
+When overdue:
+"আপনার বই ফেরত দেওয়ার তারিখ পার হয়ে গেছে। বর্তমান late fee: ৳XX"
+---
+14. SMS / EMAIL ARCHITECTURE
+Design the system so external notification providers can be integrated later.
+Do NOT hard-code an SMS provider.
+Create a notification service abstraction.
+Example:
+sendNotification()
+Possible future providers:
+SMS provider
+Email provider
+WhatsApp
+For the initial version, internal notifications are mandatory.
+Email notifications may be implemented using a server-side email provider.
+IMPORTANT SECURITY RULE:
+Never expose an email account password or SMTP credential in frontend code.
+All email credentials must exist only in secure server-side environment variables.
+---
+15. MY BOOKS PAGE
+Route:
+/my-books
+Show:
+Current Book
+Cover
+Title
+Borrow date
+Due date
+Countdown
+Late fee
+Return status
+Example:
+⏳ 3 days remaining
+If overdue:
+🔴 2 days overdue
+Show current calculated late fee.
