@@ -5,7 +5,6 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
-    "provision-admin": "tsx ./src/provision-admin.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
