@@ -24,7 +24,7 @@ import {
   UpdateBorrowRequestStatusBody,
   UpdateBorrowRequestStatusParams,
 } from "@workspace/api-zod";
-import { requireAdmin } from "../auth";
+import { getRequiredMember, requireAdmin, requireMember } from "../auth";
 
 const router: IRouter = Router();
 const DEMO_MEMBER_ID = "11111111-1111-4111-8111-111111111111";
@@ -139,6 +139,7 @@ function mapBook(book: Book) {
 }
 
 async function ensureSeedData() {
+  if (process.env.NODE_ENV === "production") return;
   if (!seedPromise) {
     seedPromise = (async () => {
       const existing = await db
@@ -341,12 +342,13 @@ async function ensureSeedData() {
   return seedPromise;
 }
 
-router.get("/dashboard", async (_req, res) => {
+router.get("/dashboard", requireMember(), async (req, res) => {
   await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
   const [member] = await db
     .select()
     .from(membersTable)
-    .where(eq(membersTable.id, DEMO_MEMBER_ID))
+    .where(eq(membersTable.id, memberId))
     .limit(1);
   const active = await db
     .select({ request: borrowRequestsTable, book: booksTable })
@@ -354,7 +356,7 @@ router.get("/dashboard", async (_req, res) => {
     .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
     .where(
       and(
-        eq(borrowRequestsTable.memberId, DEMO_MEMBER_ID),
+        eq(borrowRequestsTable.memberId, memberId),
         or(
           eq(borrowRequestsTable.status, "collected"),
           eq(borrowRequestsTable.status, "approved"),
@@ -368,7 +370,7 @@ router.get("/dashboard", async (_req, res) => {
     .from(borrowRequestsTable)
     .where(
       and(
-        eq(borrowRequestsTable.memberId, DEMO_MEMBER_ID),
+        eq(borrowRequestsTable.memberId, memberId),
         eq(borrowRequestsTable.status, "pending"),
       ),
     );
@@ -377,7 +379,7 @@ router.get("/dashboard", async (_req, res) => {
     .from(transactionsTable)
     .where(
       and(
-        eq(transactionsTable.memberId, DEMO_MEMBER_ID),
+        eq(transactionsTable.memberId, memberId),
         or(
           eq(transactionsTable.status, "approved"),
           eq(transactionsTable.status, "borrowed"),
@@ -390,7 +392,7 @@ router.get("/dashboard", async (_req, res) => {
   const memberNotifications = await db
     .select()
     .from(notificationsTable)
-    .where(eq(notificationsTable.memberId, DEMO_MEMBER_ID))
+    .where(eq(notificationsTable.memberId, memberId))
     .orderBy(desc(notificationsTable.createdAt))
     .limit(3);
   const activeItem = active[0];
@@ -518,8 +520,9 @@ router.patch("/books/:id", requireAdmin("books.update"), async (req, res) => {
   res.json(mapBook(book));
 });
 
-router.get("/requests", async (_req, res) => {
+router.get("/requests", requireMember(), async (req, res) => {
   await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
   const requests = await db
     .select({
       request: borrowRequestsTable,
@@ -531,7 +534,7 @@ router.get("/requests", async (_req, res) => {
     .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
     .innerJoin(membersTable, eq(borrowRequestsTable.memberId, membersTable.id))
     .leftJoin(transactionsTable, eq(borrowRequestsTable.transactionId, transactionsTable.id))
-    .where(eq(borrowRequestsTable.memberId, DEMO_MEMBER_ID))
+      .where(eq(borrowRequestsTable.memberId, memberId))
     .orderBy(desc(borrowRequestsTable.createdAt));
   res.json(
     requests.map(({ request, book, member, transaction }) =>
@@ -561,15 +564,16 @@ router.get("/admin/requests", requireAdmin("circulation.view"), async (_req, res
   );
 });
 
-router.get("/my-books", async (_req, res) => {
+router.get("/my-books", requireMember(), async (req, res) => {
   await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
   const rows = await db
     .select({ transaction: transactionsTable, book: booksTable })
     .from(transactionsTable)
     .innerJoin(booksTable, eq(transactionsTable.bookId, booksTable.id))
     .where(
       and(
-        eq(transactionsTable.memberId, DEMO_MEMBER_ID),
+        eq(transactionsTable.memberId, memberId),
         or(
           eq(transactionsTable.status, "approved"),
           eq(transactionsTable.status, "borrowed"),
@@ -602,19 +606,21 @@ router.get("/my-books", async (_req, res) => {
   );
 });
 
-router.get("/wishlist", async (_req, res) => {
+router.get("/wishlist", requireMember(), async (req, res) => {
   await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
   const rows = await db
     .select({ book: booksTable })
     .from(wishlistsTable)
     .innerJoin(booksTable, eq(wishlistsTable.bookId, booksTable.id))
-    .where(eq(wishlistsTable.memberId, DEMO_MEMBER_ID))
+    .where(eq(wishlistsTable.memberId, memberId))
     .orderBy(desc(wishlistsTable.createdAt));
   res.json(rows.map(({ book }) => mapBook(book)));
 });
 
-router.post("/wishlist", async (req, res) => {
+router.post("/wishlist", requireMember(), async (req, res) => {
   await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
   const bookId = String(req.body?.bookId ?? "");
   const [book] = await db.select().from(booksTable).where(eq(booksTable.id, bookId)).limit(1);
   if (!book) {
@@ -624,27 +630,34 @@ router.post("/wishlist", async (req, res) => {
   const existing = await db
     .select({ id: wishlistsTable.id })
     .from(wishlistsTable)
-    .where(and(eq(wishlistsTable.memberId, DEMO_MEMBER_ID), eq(wishlistsTable.bookId, bookId)))
+    .where(and(eq(wishlistsTable.memberId, memberId), eq(wishlistsTable.bookId, bookId)))
     .limit(1);
   if (!existing.length) {
-    await db.insert(wishlistsTable).values({ memberId: DEMO_MEMBER_ID, bookId });
+    await db.insert(wishlistsTable).values({ memberId, bookId });
   }
   res.status(201).json(mapBook(book));
 });
 
-router.delete("/wishlist/:bookId", async (req, res) => {
+router.delete("/wishlist/:bookId", requireMember(), async (req, res) => {
+  const memberId = getRequiredMember(req).memberId;
   await db
     .delete(wishlistsTable)
-    .where(and(eq(wishlistsTable.memberId, DEMO_MEMBER_ID), eq(wishlistsTable.bookId, req.params.bookId)));
+    .where(
+      and(
+        eq(wishlistsTable.memberId, memberId),
+        eq(wishlistsTable.bookId, String(req.params.bookId)),
+      ),
+    );
   res.status(204).send();
 });
 
-router.get("/notifications", async (_req, res) => {
+router.get("/notifications", requireMember(), async (req, res) => {
   await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
   const notifications = await db
     .select()
     .from(notificationsTable)
-    .where(eq(notificationsTable.memberId, DEMO_MEMBER_ID))
+    .where(eq(notificationsTable.memberId, memberId))
     .orderBy(desc(notificationsTable.createdAt))
     .limit(30);
   res.json(
@@ -659,26 +672,28 @@ router.get("/notifications", async (_req, res) => {
   );
 });
 
-router.patch("/notifications/:id/read", async (req, res) => {
+router.patch("/notifications/:id/read", requireMember(), async (req, res) => {
+  const memberId = getRequiredMember(req).memberId;
   await db
     .update(notificationsTable)
     .set({ isRead: true })
     .where(
       and(
-        eq(notificationsTable.id, req.params.id),
-        eq(notificationsTable.memberId, DEMO_MEMBER_ID),
+        eq(notificationsTable.id, String(req.params.id)),
+        eq(notificationsTable.memberId, memberId),
       ),
     );
   res.status(204).send();
 });
 
-router.post("/requests", async (req, res) => {
+router.post("/requests", requireMember(), async (req, res) => {
   await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
   const body = CreateBorrowRequestBody.parse(req.body);
   const [member] = await db
     .select()
     .from(membersTable)
-    .where(eq(membersTable.id, DEMO_MEMBER_ID))
+      .where(eq(membersTable.id, memberId))
     .limit(1);
   const today = new Date().toISOString().slice(0, 10);
   if (
@@ -727,7 +742,7 @@ router.post("/requests", async (req, res) => {
     .from(transactionsTable)
     .where(
       and(
-        eq(transactionsTable.memberId, DEMO_MEMBER_ID),
+        eq(transactionsTable.memberId, memberId),
         or(
           eq(transactionsTable.status, "approved"),
           eq(transactionsTable.status, "borrowed"),
@@ -747,7 +762,7 @@ router.post("/requests", async (req, res) => {
   const [transaction] = await db
     .insert(transactionsTable)
     .values({
-      memberId: DEMO_MEMBER_ID,
+      memberId,
       bookId: body.bookId,
       requestedPickupDate: body.pickupDate,
       requestedPickupTime: slotToTime(body.pickupSlot),
@@ -756,7 +771,7 @@ router.post("/requests", async (req, res) => {
     .returning();
   const [request] = await db
     .insert(borrowRequestsTable)
-    .values({ ...body, memberId: DEMO_MEMBER_ID, transactionId: transaction.id })
+      .values({ ...body, memberId, transactionId: transaction.id })
     .returning();
   res
     .status(201)

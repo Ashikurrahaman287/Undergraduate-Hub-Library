@@ -34,7 +34,7 @@ create table public.members (
   subscription_plan integer not null default 49 check (subscription_plan in (29, 49)),
   subscription_start date,
   subscription_end date,
-  role text not null default 'member' check (role in ('member', 'staff', 'admin', 'super_admin')),
+  role public.user_role not null default 'member',
   deposit_amount numeric(10, 2) not null default 300 check (deposit_amount >= 0),
   deposit_status text not null default 'unpaid'
     check (deposit_status in ('paid', 'unpaid', 'partially_paid', 'waived')),
@@ -67,6 +67,7 @@ create table public.borrow_requests (
   id uuid primary key default gen_random_uuid(),
   book_id uuid not null references public.books(id),
   member_id uuid not null references public.members(id),
+  transaction_id uuid,
   pickup_date date not null,
   pickup_slot text not null,
   status public.request_status not null default 'pending',
@@ -103,7 +104,7 @@ create table public.payments (
   transaction_id uuid references public.transactions(id) on delete set null,
   amount numeric(10, 2) not null check (amount > 0),
   type text not null default 'subscription'
-    check (type in ('subscription', 'deposit', 'late_fee', 'other')),
+    check (type in ('subscription', 'deposit', 'late_fee', 'lost_book', 'damage_fee', 'other')),
   method public.payment_method not null,
   reference_number text,
   collected_by uuid references auth.users(id) on delete set null,
@@ -123,7 +124,7 @@ create table public.subscriptions (
   created_at timestamptz not null default now()
 );
 
-create table public.wishlist (
+create table public.wishlists (
   id uuid primary key default gen_random_uuid(),
   member_id uuid not null references public.members(id) on delete cascade,
   book_id uuid not null references public.books(id) on delete cascade,
@@ -135,8 +136,9 @@ create table public.notifications (
   id uuid primary key default gen_random_uuid(),
   member_id uuid references public.members(id) on delete cascade,
   title text not null,
-  body text not null,
-  read_at timestamptz,
+  message text not null,
+  type text not null default 'general',
+  is_read boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -157,6 +159,37 @@ create table public.admin_sessions (
   expires_at timestamptz not null,
   created_at timestamptz not null default now(),
   last_seen_at timestamptz not null default now()
+);
+
+create table public.member_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  member_id uuid not null references public.members(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
+create table public.otp_challenges (
+  id uuid primary key default gen_random_uuid(),
+  phone text not null,
+  otp_hash text not null,
+  expires_at timestamptz not null,
+  attempts integer not null default 0,
+  requested_at timestamptz not null default now(),
+  consumed_at timestamptz,
+  request_ip text
+);
+
+create table public.audit_logs (
+  id uuid primary key default gen_random_uuid(),
+  admin_id uuid references public.members(id) on delete set null,
+  action text not null,
+  entity_type text not null,
+  entity_id uuid,
+  metadata jsonb,
+  created_at timestamptz not null default now()
 );
 
 create index books_title_idx on public.books using gin (to_tsvector('simple', title));
@@ -215,10 +248,13 @@ alter table public.borrow_requests enable row level security;
 alter table public.transactions enable row level security;
 alter table public.payments enable row level security;
 alter table public.subscriptions enable row level security;
-alter table public.wishlist enable row level security;
+alter table public.wishlists enable row level security;
 alter table public.notifications enable row level security;
 alter table public.user_roles enable row level security;
 alter table public.admin_sessions enable row level security;
+alter table public.member_sessions enable row level security;
+alter table public.otp_challenges enable row level security;
+alter table public.audit_logs enable row level security;
 
 create policy "members can read their profile" on public.profiles
 for select using (id = auth.uid() or public.is_staff());
@@ -256,12 +292,18 @@ for select using (
   member_id in (select id from public.members where auth_user_id = auth.uid())
   or public.is_staff()
 );
-create policy "members can manage their wishlist" on public.wishlist
+create policy "members can manage their wishlist" on public.wishlists
 for all using (
   member_id in (select id from public.members where auth_user_id = auth.uid())
 ) with check (
   member_id in (select id from public.members where auth_user_id = auth.uid())
 );
+
+create policy "users can read their role assignments" on public.user_roles
+for select using (user_id = auth.uid() or public.is_staff());
+
+create policy "staff can read audit logs" on public.audit_logs
+for select using (public.is_staff());
 create policy "members can read their notifications" on public.notifications
 for select using (
   member_id in (select id from public.members where auth_user_id = auth.uid())

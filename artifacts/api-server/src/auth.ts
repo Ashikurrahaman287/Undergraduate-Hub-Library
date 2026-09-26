@@ -26,14 +26,22 @@ export type AdminPermission =
   | "books.view"
   | "books.create"
   | "books.update"
+  | "books.delete"
+  | "books.import"
+  | "books.export"
   | "members.view"
   | "members.create"
   | "members.update"
+  | "members.suspend"
   | "payments.view"
   | "payments.create"
+  | "payments.update"
   | "circulation.view"
   | "circulation.approve"
+  | "circulation.return"
+  | "circulation.extend"
   | "reports.view"
+  | "reports.export"
   | "analytics.view";
 
 export type AdminIdentity = {
@@ -54,6 +62,12 @@ export type MemberIdentity = {
 };
 type MemberRequest = Request & { member?: MemberIdentity };
 
+export function getRequiredMember(request: Request) {
+  const member = (request as MemberRequest).member;
+  if (!member) throw new Error("Member identity is missing.");
+  return member;
+}
+
 const ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[]> = {
   staff: [
     "books.view",
@@ -65,28 +79,42 @@ const ROLE_PERMISSIONS: Record<AdminRole, readonly AdminPermission[]> = {
     "books.view",
     "books.create",
     "books.update",
+    "books.export",
     "members.view",
     "members.create",
     "members.update",
+    "members.suspend",
     "payments.view",
     "payments.create",
+    "payments.update",
     "circulation.view",
     "circulation.approve",
+    "circulation.return",
+    "circulation.extend",
     "reports.view",
+    "reports.export",
     "analytics.view",
   ],
   super_admin: [
     "books.view",
     "books.create",
     "books.update",
+    "books.delete",
+    "books.import",
+    "books.export",
     "members.view",
     "members.create",
     "members.update",
+    "members.suspend",
     "payments.view",
     "payments.create",
+    "payments.update",
     "circulation.view",
     "circulation.approve",
+    "circulation.return",
+    "circulation.extend",
     "reports.view",
+    "reports.export",
     "analytics.view",
   ],
 };
@@ -390,12 +418,52 @@ export async function authenticateAdminWithSupabase(email: string, password: str
   return { kind: "authenticated" as const, identity };
 }
 
-function getSupabaseConfig() {
+export function getSupabaseConfig() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !anonKey || !serviceRoleKey) return null;
   return { url, anonKey, serviceRoleKey };
+}
+
+export async function requestAdminPasswordReset(email: string) {
+  const config = getSupabaseConfig();
+  if (!config) return { kind: "not_configured" as const };
+
+  const redirectTo = process.env.ADMIN_PASSWORD_RESET_REDIRECT_URL;
+  const response = await fetch(`${config.url}/auth/v1/recover`, {
+    method: "POST",
+    headers: {
+      apikey: config.anonKey,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      email: email.trim().toLowerCase(),
+      ...(redirectTo ? { redirect_to: redirectTo } : {}),
+    }),
+  });
+  if (!response.ok && response.status !== 400) {
+    throw new Error("Unable to start password recovery.");
+  }
+  return { kind: "accepted" as const };
+}
+
+export async function updateAdminPassword(accessToken: string, password: string) {
+  const config = getSupabaseConfig();
+  if (!config) return { kind: "not_configured" as const };
+
+  const response = await fetch(`${config.url}/auth/v1/user`, {
+    method: "PUT",
+    headers: {
+      apikey: config.anonKey,
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ password }),
+  });
+  return response.ok
+    ? ({ kind: "updated" as const })
+    : ({ kind: "invalid_or_expired_token" as const });
 }
 
 async function ensureSupabasePhoneUser(phone: string) {
