@@ -1,0 +1,578 @@
+HOME PAGE
+Include:
+Undergraduate Hub logo
+Search bar
+Categories
+Language filter
+Available-only filter
+Book grid
+Featured books
+Recently added books
+Popular books
+Wishlist indicator
+The system should support approximately 1200+ books without loading all heavy data at once.
+Use:
+pagination
+  OR
+infinite scrolling
+  OR
+server-side pagination
+Do NOT render 1200 large images simultaneously.
+Use optimized Next.js image loading.
+---
+BOOK CARD
+Each card should show:
+Cover
+Title
+Author
+Category
+Language
+Availability
+Status examples:
+🟢 Available
+🔴 Rented
+⚠️ Lost
+Buttons:
+View Details
+Wishlist
+---
+BOOK DETAILS PAGE
+Route:
+/books/[id]
+Show:
+Large cover
+Title
+Author
+Category
+Language
+Description/condition note
+Availability
+Deposit requirement
+Deposit amount
+Current status
+If rented:
+Show:
+"Currently rented"
+and expected return date if available.
+If available:
+Show:
+"বই ধার নিন"
+---
+11. BORROW REQUEST FLOW
+When a logged-in member clicks:
+Borrow Book
+Open a form.
+Member must provide:
+Preferred pickup date
+Preferred pickup time
+Optional note
+Before submitting, check:
+Subscription active?
+Existing active book?
+Book available?
+Deposit requirement?
+Member account active?
+If valid:
+Create borrow request.
+Show:
+"আপনার বই নেওয়ার অনুরোধটি পাঠানো হয়েছে। Admin অনুমোদন করলে আপনাকে জানানো হবে।"
+Request status:
+Pending
+Approved
+Rejected
+Rescheduled
+Cancelled
+---
+12. ADMIN BORROW APPROVAL
+Admin sees pending requests.
+For each request:
+Member
+Phone
+University
+Book
+Requested pickup date
+Requested pickup time
+Deposit status
+Subscription status
+Actions:
+Approve
+Admin can:
+approve requested date/time
+  OR
+select another date/time
+Reschedule
+Admin can change:
+pickup date
+pickup time
+Reject
+Admin must provide reason.
+After approval:
+Transaction becomes approved
+Member receives notification
+Member sees approved pickup time
+---
+13. NOTIFICATIONS
+Implement an internal notification system.
+When Admin approves:
+"আপনার বই নেওয়ার অনুরোধটি অনুমোদিত হয়েছে।"
+When Admin reschedules:
+"আপনার বই নেওয়ার সময় পরিবর্তন করা হয়েছে। নতুন সময়: ..."
+When book is approaching due date:
+"আপনার বই ফেরত দেওয়ার সময় খুব কাছে।"
+When overdue:
+"আপনার বই ফেরত দেওয়ার তারিখ পার হয়ে গেছে। বর্তমান late fee: ৳XX"
+---
+14. SMS / EMAIL ARCHITECTURE
+Design the system so external notification providers can be integrated later.
+Do NOT hard-code an SMS provider.
+Create a notification service abstraction.
+Example:
+sendNotification()
+Possible future providers:
+SMS provider
+Email provider
+WhatsApp
+For the initial version, internal notifications are mandatory.
+Email notifications may be implemented using a server-side email provider.
+IMPORTANT SECURITY RULE:
+Never expose an email account password or SMTP credential in frontend code.
+All email credentials must exist only in secure server-side environment variables.
+---
+15. MY BOOKS PAGE
+Route:
+/my-books
+Show:
+Current Book
+Cover
+Title
+Borrow date
+Due date
+Countdown
+Late fee
+Return status
+Example:
+⏳ 3 days remaining
+If overdue:
+🔴 2 days overdue
+Show current calculated late fee.
+---
+16. BOOK HISTORY
+Show previously borrowed books.
+Columns/cards:
+Book
+Borrow date
+Return date
+Status
+Late fee
+Also display:
+Total Books Read
+---
+17. PROFILE PAGE
+Route:
+/profile
+Show:
+Name
+Email
+Phone
+University
+Student ID
+Subscription plan
+Subscription status
+Subscription expiry date
+Deposit status
+Deposit amount
+Outstanding late fee
+Total books read
+Use progress/status cards.
+---
+18. WISHLIST
+Members can save books.
+Wishlist page:
+/wishlist
+Show:
+Book cover
+Title
+Author
+Current availability
+Remove button
+Optional recommended feature:
+When a wishlisted book becomes available, create an in-app notification.
+---
+19. ADMIN DASHBOARD
+Route:
+/admin
+Admin authentication required.
+Dashboard should have statistics.
+Statistics Cards
+Total Books
+Available Books
+Rented Books
+Lost Books
+Overdue Books
+Total Members
+Active Subscriptions
+Expired Subscriptions
+Pending Borrow Requests
+This Month Collection
+Outstanding Late Fees
+Do not expose sensitive member information unnecessarily.
+---
+20. ADMIN BOOK MANAGEMENT
+Route:
+/admin/books
+Features:
+Add Book
+Edit Book
+Delete Book
+Search
+Filter
+Sort
+Pagination
+Bulk CSV import
+Export CSV
+Generate QR
+Upload cover
+Change availability
+Mark lost
+Restore lost book
+Fields:
+Title
+Author
+Category
+Language
+ISBN
+Cover
+Original price
+Condition
+Deposit required
+Deposit amount
+---
+21. QR CODE SYSTEM
+Every book receives a unique QR code.
+QR should encode something like:
+/books/{book-id}
+or a dedicated public book URL.
+Admin can:
+Generate QR
+View QR
+Download QR
+Print QR
+Add a future-ready QR scanner feature.
+Recommended future workflow:
+Staff scans book QR → book information opens → staff can quickly:
+Issue book
+Return book
+View current borrower
+View status
+---
+22. CSV BULK IMPORT
+Admin must be able to import approximately 1200 books.
+CSV columns:
+title
+author
+category
+language
+isbn
+price
+condition_note
+deposit_required
+deposit_amount
+cover_url
+Show:
+total rows
+successful imports
+failed rows
+duplicate rows
+validation errors
+DO NOT insert everything blindly.
+Validate every row before database insertion.
+Provide an example CSV template for download.
+---
+23. MEMBER MANAGEMENT
+Route:
+/admin/members
+Features:
+Search
+Filter by university
+Filter by status
+View member
+Add member
+Edit member
+Suspend member
+Activate member
+Extend subscription
+Change plan
+Record deposit
+Record payment
+View borrowing history
+Member profile should show:
+Basic information
+Subscription
+Deposit
+Current book
+History
+Payments
+Late fees
+Admin notes
+---
+24. OFFLINE PAYMENT COLLECTION
+Route:
+/admin/payments
+Create a simple form.
+Fields:
+Member:
+[Select member]
+Payment type:
+Subscription
+Deposit
+Late Fee
+Other
+Amount:
+৳ ______
+Method:
+Cash
+bKash
+Nagad
+Reference number:
+Optional
+Collected by:
+Current admin
+Status:
+Paid
+Notes:
+Optional
+Submit.
+After submission:
+Update relevant member/payment status.
+---
+25. PAYMENT HISTORY
+Admin should be able to see:
+Date
+Member
+Amount
+Type
+Method
+Collected by
+Reference
+Status
+Add filters:
+Date
+Method
+Type
+Staff
+Member
+---
+26. SUBSCRIPTION MANAGEMENT
+Default pricing:
+First 100 members:
+৳29
+After first 100 members:
+৳49
+Admin can manually override the price.
+Subscription should have:
+Start date
+End date
+Plan
+Payment status
+Admin can manually:
+activate
+renew
+extend
+expire
+suspend
+---
+27. ADMIN CIRCULATION PAGE
+Route:
+/admin/circulation
+Show:
+Pending Requests
+Approved
+Currently Borrowed
+Overdue
+Returned
+Overdue books must be visually highlighted in RED.
+Show:
+Member
+Phone
+Book
+Borrow date
+Due date
+Days overdue
+Current late fee
+Actions:
+Mark returned
+Extend due date
+Add staff note
+Record late payment
+Mark book lost
+---
+28. BOOK RETURN FLOW
+Admin clicks:
+Return Book
+System should:
+Record return date/time
+Calculate late days
+Calculate late fee
+Change transaction status to returned
+Change book status to available
+Increment member's total_books_read
+Create late fee payment requirement if applicable
+If book is damaged:
+Admin can add condition note.
+If lost:
+mark book as lost
+calculate original book price
+create outstanding payment record
+---
+29. LOST BOOK LOGIC
+If a book is marked lost:
+Book status:
+lost
+Admin should see:
+Original book price
+Member who had it
+Outstanding penalty
+Create a configurable penalty mechanism.
+Default:
+Penalty = original book price
+Admin can override the penalty manually.
+---
+30. DASHBOARD ANALYTICS
+Add useful charts.
+Examples:
+Books borrowed this month
+Books returned this month
+New members
+Subscription revenue
+Late fees
+Most borrowed books
+Popular categories
+University-wise membership
+Use lightweight charts.
+Keep the mobile dashboard usable.
+---
+31. SEARCH
+Implement fast server-side search.
+Search by:
+title
+author
+ISBN
+Filters:
+category
+language
+availability
+Search must work efficiently with 1200+ books.
+Use PostgreSQL indexes.
+---
+32. MOBILE-FIRST DESIGN
+90%+ of users are expected to use mobile.
+Therefore:
+Design mobile first
+Bottom navigation for members
+Sticky search
+Large buttons
+Responsive cards
+Avoid wide desktop tables on mobile
+Use horizontal scrolling only where necessary
+Use sheets/dialogs for mobile actions
+Optimize images
+Keep pages fast
+Member navigation:
+Home
+Search
+My Books
+Wishlist
+Profile
+Admin navigation can use a responsive sidebar.
+---
+33. PWA
+Make the member application installable.
+Include:
+manifest
+icons
+theme color
+service worker
+offline-friendly shell
+install prompt where appropriate
+The application should behave like a mobile app when installed.
+---
+34. AUTHENTICATION
+Use Supabase Auth.
+Member authentication:
+Email/password OR magic-link authentication
+Admin:
+Secure email/password login
+Use protected routes.
+Members must NOT access:
+/admin/*
+Admin must NOT rely only on hidden UI.
+Enforce authorization using:
+Supabase RLS
+Server-side role checks
+---
+35. SUPABASE STORAGE
+Create storage buckets for:
+book-covers
+qr-codes
+optional member/profile images
+Use secure policies.
+Do not expose service-role keys to the browser.
+---
+36. SECURITY REQUIREMENTS
+Implement:
+Supabase RLS
+Role-based access control
+Input validation
+Zod schemas
+Server-side authorization
+Rate limiting where practical
+Safe file uploads
+Image type validation
+CSV validation
+SQL injection protection through Supabase APIs
+No secrets in Git
+No service-role key in client-side code
+Never trust client-side validation.
+---
+37. ERROR HANDLING
+Create friendly error states.
+Examples:
+Book unavailable:
+"দুঃখিত, এই বইটি বর্তমানে অন্য একজন সদস্যের কাছে আছে।"
+Subscription expired:
+"আপনার subscription-এর মেয়াদ শেষ হয়েছে।"
+Existing book:
+"আপনার কাছে ইতোমধ্যে একটি বই আছে।"
+Network error:
+"কিছু সমস্যা হয়েছে। আবার চেষ্টা করুন।"
+Admin errors should provide useful technical logs without exposing sensitive data to users.
+---
+38. LOADING STATES
+Every async operation must have proper loading UI.
+Use:
+Skeleton loaders
+Button loading states
+Empty states
+Error states
+Never leave users staring at a blank screen.
+---
+39. EMPTY STATES
+Examples:
+No books:
+"এই মুহূর্তে কোনো বই পাওয়া যায়নি।"
+No wishlist:
+"আপনার Wishlist এখনো খালি।"
+No current book:
+"আপনার কাছে বর্তমানে কোনো বই নেই।"
+No history:
+"আপনার বই পড়ার history এখানে দেখা যাবে।"
+---
+40. RECOMMENDED EXTRA FEATURES
+Add the following features if practical.
+A. Smart Book Recommendation
+Recommend books based on:
+Previously borrowed category
+Wishlist
+Popular books
+Similar authors
+Keep this rule-based initially; no paid AI API is r 

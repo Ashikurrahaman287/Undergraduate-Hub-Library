@@ -1,0 +1,1400 @@
+# UNDERGRADUATE HUB
+
+## Production Admin Security + Bangladesh Phone OTP Specification
+
+Implement the following requirements exactly.
+
+---
+
+# 5. ADMIN PANEL MUST BE COMPLETELY PROTECTED
+
+The main public/member website must NOT expose the Admin Dashboard or any administrative data.
+
+Normal members must never have access to:
+
+* Admin statistics
+* Admin book management
+* Admin member management
+* Admin payments
+* Admin circulation
+* Admin settings
+* Admin reports
+* Admin analytics
+* Admin configuration
+* Audit logs
+* Staff management
+* System configuration
+* Email/SMS configuration
+* Financial reports
+* Database-level administrative information
+
+Do NOT rely on frontend hiding for security.
+
+The following are NOT acceptable as the primary security mechanism:
+
+* Hidden buttons
+* Hidden navigation links
+* Frontend role state
+* React state
+* localStorage
+* sessionStorage
+* Manually created authentication cookies
+* Client-side role checks
+* URL obscurity
+* JavaScript-only authorization
+
+Every protected Admin request must be authorized on the server.
+
+---
+
+# 6. ADMIN LOGIN
+
+Create:
+
+`/admin/login`
+
+Display:
+
+**Undergraduate Hub**
+
+**Admin Portal**
+
+Fields:
+
+* Email
+* Password
+* Remember Session
+* Login
+* Forgot Password
+
+Use **Supabase Auth** for administrator authentication.
+
+Do NOT create a separate insecure custom password authentication system.
+
+Admin authentication must use:
+
+* Supabase Auth
+* Secure server-side session handling
+* Server-side role verification
+* Protected server routes
+* Protected Server Actions/API routes
+* Supabase RLS
+
+After successful login:
+
+`/admin/login`
+
+→ `/admin`
+
+If the account is authenticated but does not have an authorized administrative role:
+
+→ deny access.
+
+---
+
+# 7. ADMIN INITIAL PASSWORD
+
+The project owner has supplied an initial administrator password.
+
+IMPORTANT:
+
+The actual password must NEVER be:
+
+* Hard-coded into frontend code
+* Committed to Git
+* Included in seed files
+* Included in SQL migrations
+* Exposed in JavaScript
+* Returned by an API
+* Stored in localStorage
+* Stored in sessionStorage
+* Displayed anywhere in the UI
+* Printed in logs
+* Included in audit logs
+* Included in error messages
+* Included in documentation that is committed to the repository
+
+Use a server-side environment variable:
+
+`ADMIN_INITIAL_PASSWORD`
+
+only for the initial administrator provisioning process.
+
+Also use:
+
+`ADMIN_INITIAL_EMAIL`
+
+for the initial administrator email.
+
+The README must explain:
+
+1. Set the initial admin credentials through secure deployment environment variables.
+2. Run the administrator provisioning process.
+3. Create the administrator through Supabase Auth.
+4. Assign the administrator role.
+5. Remove/rotate the initial provisioning secret after successful setup.
+6. Never commit `.env` files.
+7. Never expose secrets through frontend code.
+
+After the initial administrator has been created:
+
+**Supabase Auth becomes the source of truth for authentication.**
+
+Provide:
+
+* Password reset
+* Forgot password
+* Session expiration
+* Logout
+* Logout from all sessions where supported
+* Secure session refresh
+* Account recovery
+
+Do not store administrator passwords inside the application's own database.
+
+---
+
+# 8. ADMIN ROLE SYSTEM
+
+Create a proper role architecture.
+
+Initial roles:
+
+* `member`
+* `admin`
+
+Database architecture must support future roles:
+
+* `staff`
+* `admin`
+* `super_admin`
+
+Recommended structure:
+
+`user_roles`
+
+Fields:
+
+* id
+* user_id
+* role
+* created_at
+* updated_at
+* created_by
+
+Use a database enum or equivalent constrained role structure.
+
+Do NOT trust:
+
+* role from request body
+* role from query parameter
+* role from URL
+* role from localStorage
+* role from React state
+* role from a client-side JWT claim without server verification
+* manually created cookies
+
+The server must determine the authenticated user's identity and role.
+
+Every Admin Server Action/API route must perform authorization.
+
+Example conceptual flow:
+
+```text
+Request
+   ↓
+Validate Supabase session
+   ↓
+Identify authenticated user
+   ↓
+Load/verify role server-side
+   ↓
+Check required permission
+   ↓
+Allow or deny
+```
+
+A normal member must receive an authorization failure even if they manually call an Admin API endpoint.
+
+---
+
+# 9. GRANULAR ADMIN PERMISSIONS
+
+Do not design the system so that every administrator automatically has unlimited access.
+
+Prepare the architecture for granular permissions.
+
+Possible permissions:
+
+* books.view
+* books.create
+* books.update
+* books.delete
+* books.import
+* books.export
+* members.view
+* members.create
+* members.update
+* members.suspend
+* payments.view
+* payments.create
+* payments.update
+* circulation.view
+* circulation.approve
+* circulation.return
+* circulation.extend
+* reports.view
+* reports.export
+* analytics.view
+* settings.view
+* settings.update
+* notifications.manage
+* staff.view
+* staff.manage
+* audit.view
+* system.manage
+
+`super_admin` can have all permissions.
+
+`admin` can have business-management permissions.
+
+`staff` can have operational permissions.
+
+`member` has no Admin permissions.
+
+Implement this architecture even if the first deployment only uses `admin` and `member`.
+
+---
+
+# 10. ADMIN ACCESS FROM MAIN WEBSITE
+
+The main website must NOT have a large Admin Dashboard button.
+
+Use a discreet:
+
+**Account / Menu dropdown**
+
+For authenticated administrators, display:
+
+**Admin Panel**
+
+For normal members:
+
+Do NOT show administrative functionality.
+
+The Admin Panel link is only a convenience.
+
+It must NOT provide security.
+
+Security must remain enforced server-side.
+
+If an unauthenticated visitor manually visits:
+
+`/admin`
+
+redirect to:
+
+`/admin/login`
+
+If an authenticated member manually visits:
+
+`/admin`
+
+or:
+
+`/admin/*`
+
+the server must reject access.
+
+Do not send Admin data to the browser before authorization.
+
+Recommended response:
+
+* Redirect to an appropriate unauthorized page, or
+* Return HTTP `403 Unauthorized/Forbidden` for API requests.
+
+Never render administrative content and then hide it using CSS or JavaScript.
+
+---
+
+# 11. ADMIN ROUTE PROTECTION
+
+Protect the complete Admin route tree:
+
+```text
+/admin
+/admin/books
+/admin/books/new
+/admin/books/[id]
+/admin/members
+/admin/members/[id]
+/admin/payments
+/admin/circulation
+/admin/reports
+/admin/analytics
+/admin/settings
+/admin/staff
+/admin/audit-logs
+/admin/notifications
+/admin/system
+```
+
+Use Next.js middleware where appropriate for early authentication checks.
+
+However:
+
+**Middleware alone is NOT sufficient.**
+
+Every sensitive Server Action and API endpoint must independently verify authorization.
+
+For example:
+
+```text
+POST /api/admin/books
+POST /api/admin/members
+POST /api/admin/payments
+POST /api/admin/circulation
+POST /api/admin/settings
+GET  /api/admin/reports
+```
+
+must perform server-side authorization.
+
+---
+
+# 12. SUPABASE ROW LEVEL SECURITY
+
+Enable RLS on every sensitive table.
+
+Members must only be able to access their own permitted records.
+
+Example:
+
+A member may access:
+
+* Their own profile
+* Their own borrow history
+* Their own payments
+* Their own wishlist
+* Their own notifications
+* Public book information
+
+A member must NOT be able to query:
+
+* Other members
+* Admin accounts
+* Staff accounts
+* All payments
+* All circulation records
+* Audit logs
+* System settings
+* SMTP/SMS configuration
+* Internal analytics
+
+Administrative database access must require an authorized role.
+
+Never disable RLS simply because the application has frontend authorization.
+
+---
+
+# 13. PHONE OTP — REPLACE EMAIL OTP COMPLETELY
+
+Do NOT implement Email OTP for members.
+
+Member authentication must use:
+
+**Bangladeshi mobile phone number + OTP**
+
+Only Bangladeshi phone numbers are accepted.
+
+Supported format examples:
+
+```text
+017XXXXXXXX
+018XXXXXXXX
+019XXXXXXXX
+016XXXXXXXX
+013XXXXXXXX
+014XXXXXXXX
+015XXXXXXXX
+```
+
+Also support international format:
+
+```text
++8801XXXXXXXXX
+```
+
+Normalize all accepted numbers internally to one canonical format.
+
+Recommended canonical format:
+
+```text
++8801XXXXXXXXX
+```
+
+Do not store multiple formats for the same phone number.
+
+---
+
+# 14. BANGLADESHI PHONE VALIDATION
+
+Create a server-side phone normalization and validation utility.
+
+Example:
+
+```text
+01712345678
+↓
++8801712345678
+```
+
+Reject:
+
+* Non-Bangladeshi numbers
+* Invalid length
+* Invalid operator prefix
+* Letters
+* Malformed numbers
+* Empty numbers
+* Suspicious input
+
+Validation must happen:
+
+1. Frontend
+2. Server
+3. Database where practical
+
+Frontend validation is only for user experience.
+
+The server is authoritative.
+
+---
+
+# 15. PHONE OTP FLOW
+
+Member login/registration:
+
+```text
+Enter phone number
+        ↓
+Validate Bangladesh number
+        ↓
+Check rate limit
+        ↓
+Generate cryptographically secure OTP
+        ↓
+Hash OTP before storing
+        ↓
+Store expiration time
+        ↓
+Send OTP through SMS provider
+        ↓
+User enters OTP
+        ↓
+Verify hashed OTP
+        ↓
+Check expiration
+        ↓
+Check maximum attempts
+        ↓
+Mark OTP as consumed
+        ↓
+Authenticate user through Supabase Auth
+        ↓
+Create secure authenticated session
+        ↓
+Redirect to member dashboard
+```
+
+OTP requirements:
+
+* 6-digit numeric OTP
+* Cryptographically secure random generation
+* Expiration: approximately 5 minutes
+* One-time use
+* Maximum verification attempts
+* Resend cooldown
+* IP rate limiting
+* Phone-number rate limiting
+* Failed-attempt tracking
+* OTP must be invalidated after successful verification
+* Old OTPs must become invalid when a new OTP is generated
+
+Never store OTPs in plaintext.
+
+Store a secure hash.
+
+---
+
+# 16. SMS PROVIDER INTEGRATION
+
+Use the SMS provider supplied by the project owner.
+
+The SMS API must be called **ONLY from the server**.
+
+The provider credentials/API key are secrets.
+
+NEVER:
+
+* Put the API key in React code
+* Put it in browser JavaScript
+* Put it in a public environment variable
+* Put it in Git
+* Put it in the database as plaintext
+* Return it from an API
+* Display it in Admin UI
+* Include it in logs
+
+Use environment variables such as:
+
+```env
+SMS_API_BASE_URL=
+SMS_API_KEY=
+SMS_API_LABEL=transactional
+```
+
+The API URL should be implemented through these server-side configuration variables rather than hard-coded into client code.
+
+Use the provider's required parameters:
+
+```text
+apikey
+phonenumber
+message
+label
+```
+
+The implementation must URL-encode all parameters safely.
+
+---
+
+# 17. SMS SERVICE ARCHITECTURE
+
+Create a dedicated server-side service:
+
+```text
+lib/sms/
+    provider.ts
+    sendOtp.ts
+    templates.ts
+```
+
+Example conceptual interface:
+
+```typescript
+sendSms({
+  phone,
+  message,
+  type
+})
+```
+
+OTP should use:
+
+```text
+type = "otp"
+```
+
+Future notification types:
+
+```text
+otp
+borrow_approved
+borrow_rescheduled
+due_reminder
+overdue_notice
+payment_receipt
+subscription_expiry
+general
+```
+
+This allows the SMS provider to be replaced later without rewriting the application.
+
+---
+
+# 18. OTP MESSAGE
+
+Use a short Bangla/English mixed transactional message.
+
+Example:
+
+```text
+Undergraduate Hub verification code: 123456.
+This OTP will expire in 5 minutes.
+Do not share this code with anyone.
+```
+
+The actual OTP must be dynamically generated.
+
+Do not log the complete OTP.
+
+Production logs may record:
+
+```text
+OTP requested
+phone masked
+timestamp
+request ID
+delivery result
+```
+
+but never:
+
+```text
+OTP: 123456
+```
+
+---
+
+# 19. OTP RATE LIMITING
+
+Implement strong anti-abuse protection.
+
+Recommended limits:
+
+Per phone:
+
+* Maximum OTP requests per short period
+* Resend cooldown
+* Daily reasonable limit
+
+Per IP:
+
+* Maximum OTP requests per minute/hour
+* Maximum verification attempts
+
+Per OTP:
+
+* Maximum failed attempts
+* Expire automatically
+* Immediately invalidate after success
+
+Return generic messages where appropriate so attackers cannot easily enumerate registered accounts.
+
+Example:
+
+```text
+If an account exists, an OTP has been sent to your phone.
+```
+
+Do not expose unnecessary account-existence information.
+
+---
+
+# 20. SUPABASE AUTH + PHONE OTP
+
+Supabase Auth must remain the identity/authentication foundation.
+
+Do NOT create a completely separate homemade authentication system.
+
+The application-level SMS OTP service must be designed as an authentication layer that securely integrates with Supabase Auth.
+
+The implementation must ensure that:
+
+```text
+Successful OTP verification
+        ↓
+Verified identity
+        ↓
+Supabase Auth authenticated session
+        ↓
+Server-side authorization
+```
+
+Do not simply set:
+
+```text
+isLoggedIn = true
+```
+
+in frontend state.
+
+Do not create fake authentication cookies.
+
+Do not manually trust a phone number supplied by the browser after OTP verification.
+
+The authenticated Supabase user ID must become the permanent identity reference.
+
+---
+
+# 21. MEMBER DATABASE IDENTITY
+
+Use:
+
+```text
+auth.users.id
+```
+
+as the primary authentication identity.
+
+Create:
+
+```text
+members.auth_user_id
+```
+
+with a foreign key to the authenticated Supabase user.
+
+Never use the phone number itself as the database primary key.
+
+Phone number should have a unique constraint.
+
+---
+
+# 22. MEMBER REGISTRATION
+
+New member flow:
+
+```text
+Phone number
+      ↓
+Bangladesh validation
+      ↓
+Send OTP
+      ↓
+Verify OTP
+      ↓
+Create/identify Supabase Auth user
+      ↓
+Create member profile
+      ↓
+Collect:
+    Name
+    Phone
+    Email (optional)
+    University
+    Student ID
+      ↓
+Assign member role
+      ↓
+Create member number
+      ↓
+Apply subscription rules
+      ↓
+Member dashboard
+```
+
+Do not allow a member to choose:
+
+```text
+admin
+super_admin
+staff
+```
+
+as their role.
+
+Role assignment must happen server-side.
+
+---
+
+# 23. ADMIN AUTHENTICATION IS DIFFERENT FROM MEMBER OTP
+
+Administrators should NOT use the normal member phone OTP flow for Admin Panel login.
+
+Admin login:
+
+```text
+/admin/login
+```
+
+uses:
+
+```text
+Email
+Password
+```
+
+through Supabase Auth.
+
+This separates:
+
+```text
+Member authentication
+    ↓
+Phone OTP
+
+Administrator authentication
+    ↓
+Supabase Auth email/password
+```
+
+An administrator may also have a phone number stored in their profile for operational purposes, but it must not automatically grant administrative access.
+
+---
+
+# 24. ADMIN PASSWORD RESET
+
+Implement:
+
+**Forgot Password**
+
+Use Supabase Auth password-reset functionality.
+
+The reset process must use a secure, time-limited recovery mechanism.
+
+Never create a custom password-reset token system unless absolutely required by Supabase.
+
+Never email the actual password.
+
+Never reveal passwords.
+
+---
+
+# 25. REMEMBER SESSION
+
+The Admin Login page should include:
+
+```text
+☐ Remember Session
+```
+
+Use Supabase's supported secure session persistence mechanism.
+
+Do not implement:
+
+```text
+localStorage = password
+```
+
+or:
+
+```text
+localStorage = admin
+```
+
+or:
+
+```text
+cookie = admin=true
+```
+
+Never trust manually created authentication cookies.
+
+---
+
+# 26. ADMIN SESSION SECURITY
+
+Implement:
+
+* Secure cookies
+* HttpOnly where applicable
+* SameSite protection
+* HTTPS in production
+* Proper session refresh
+* Session expiration
+* Logout
+* Password recovery
+* Server-side authentication checks
+
+Never put:
+
+* access tokens
+* refresh tokens
+* passwords
+* API keys
+* SMS credentials
+
+into normal application UI state.
+
+---
+
+# 27. ADMIN EMAIL/SMS SETTINGS
+
+Create:
+
+```text
+/admin/settings/notifications
+```
+
+with secure configuration for notification services.
+
+Sections:
+
+### SMS Settings
+
+Display:
+
+* Provider status
+* API base URL
+* API key: masked
+* Sender/label
+* Test SMS
+* Last successful test
+* Last error
+
+Secrets must never be displayed after saving.
+
+For example:
+
+```text
+API Key
+••••••••••••••••
+```
+
+Provide:
+
+```text
+Update API Key
+```
+
+rather than showing the existing key.
+
+If secrets are stored in the database, encrypt them using a server-only encryption key.
+
+Recommended:
+
+```env
+ENCRYPTION_KEY=
+```
+
+Never expose the encryption key to the browser.
+
+---
+
+# 28. ENVIRONMENT VARIABLES
+
+Create:
+
+```text
+.env.example
+```
+
+with placeholders only.
+
+Example categories:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+SUPABASE_SERVICE_ROLE_KEY=
+
+ADMIN_INITIAL_EMAIL=
+ADMIN_INITIAL_PASSWORD=
+
+SMS_API_BASE_URL=
+SMS_API_KEY=
+SMS_API_LABEL=
+
+ENCRYPTION_KEY=
+
+CRON_SECRET=
+```
+
+Never place real credentials in `.env.example`.
+
+Add:
+
+```text
+.env
+.env.local
+.env.production
+```
+
+to `.gitignore`.
+
+---
+
+# 29. SECRET MANAGEMENT
+
+Classify variables.
+
+Public/browser-safe:
+
+```text
+NEXT_PUBLIC_SUPABASE_URL
+NEXT_PUBLIC_SUPABASE_ANON_KEY
+```
+
+Server-only:
+
+```text
+SUPABASE_SERVICE_ROLE_KEY
+ADMIN_INITIAL_PASSWORD
+SMS_API_KEY
+ENCRYPTION_KEY
+CRON_SECRET
+```
+
+Never use `NEXT_PUBLIC_` for secrets.
+
+Never import server-only secret modules into client components.
+
+Use server-only boundaries wherever possible.
+
+---
+
+# 30. ADMIN DATA ISOLATION
+
+Do not preload Admin data into the public website.
+
+For example, the public home page must not fetch:
+
+```text
+all members
+all payments
+all transactions
+all financial totals
+all admin analytics
+```
+
+and then hide them.
+
+The database query itself must only retrieve information required by the current user.
+
+---
+
+# 31. PUBLIC WEBSITE
+
+The public website should show only appropriate public information:
+
+* Undergraduate Hub branding
+* Books
+* Book availability
+* Categories
+* Search
+* How it works
+* Membership information
+* Library rules
+* FAQ
+* Contact
+* Public announcements
+
+No administrative financial information.
+
+No private member data.
+
+No internal inventory notes.
+
+No staff information unless explicitly intended to be public.
+
+---
+
+# 32. MEMBER ACCOUNT MENU
+
+For normal members:
+
+```text
+Account
+├── My Profile
+├── My Books
+├── Wishlist
+├── Borrow History
+├── Notifications
+└── Logout
+```
+
+For administrators:
+
+```text
+Account
+├── My Profile
+├── Admin Panel
+├── My Books
+├── Notifications
+└── Logout
+```
+
+The Admin Panel item is merely navigation convenience.
+
+The server remains the authority.
+
+---
+
+# 33. AUDIT LOGGING
+
+Create:
+
+```text
+audit_logs
+```
+
+Record administrative actions such as:
+
+* Admin login
+* Failed admin login where appropriate
+* Book created
+* Book edited
+* Book deleted
+* Member edited
+* Member suspended
+* Subscription changed
+* Payment recorded
+* Payment edited
+* Borrow approved
+* Borrow rejected
+* Book returned
+* Book marked lost
+* Late fee modified
+* Settings changed
+* Staff permission changed
+* SMS settings changed
+* Report generated
+
+Never record:
+
+* Passwords
+* OTP values
+* API keys
+* Access tokens
+* Refresh tokens
+* Encryption keys
+
+Audit logs should include:
+
+```text
+id
+actor_user_id
+action
+entity_type
+entity_id
+metadata
+ip_address where appropriate
+user_agent where appropriate
+created_at
+```
+
+Sensitive metadata must be sanitized.
+
+---
+
+# 34. SECURITY TESTING
+
+Before declaring the project production-ready, test:
+
+### Anonymous visitor
+
+Attempt:
+
+```text
+/admin
+/admin/books
+/admin/members
+/admin/payments
+/admin/settings
+```
+
+Expected:
+
+```text
+No admin data
+No unauthorized access
+```
+
+### Normal member
+
+Attempt direct access to:
+
+```text
+/admin
+/admin/books
+/admin/members
+/admin/payments
+/admin/reports
+/admin/settings
+```
+
+Expected:
+
+```text
+403 / unauthorized
+```
+
+Also directly call Admin APIs.
+
+Example:
+
+```text
+POST /api/admin/books
+GET /api/admin/members
+GET /api/admin/payments
+```
+
+Expected:
+
+```text
+403 Forbidden
+```
+
+The frontend must not be the only protection.
+
+### Admin
+
+Expected:
+
+* Can access authorized Admin pages
+* Can perform permitted actions
+* Cannot bypass permission restrictions
+
+### Supabase database
+
+Test RLS independently.
+
+A member must not be able to query another member's private information.
+
+---
+
+# 35. PRODUCTION ACCEPTANCE CRITERIA
+
+The project is NOT considered complete until all of the following are true:
+
+* Admin login uses Supabase Auth
+* Admin password is not hard-coded
+* Initial password is supplied only through secure server configuration
+* Password reset works
+* Member authentication uses Bangladeshi Phone OTP
+* SMS API key remains server-side
+* OTPs are hashed
+* OTPs expire
+* OTPs are single-use
+* OTP rate limiting exists
+* Bangladesh phone validation exists
+* Admin roles are server-authorized
+* Admin APIs perform authorization independently
+* Supabase RLS is enabled
+* Members cannot access admin data
+* Members cannot access other members' private data
+* Admin navigation is hidden from normal members
+* Direct `/admin/*` access is protected
+* Secrets are excluded from Git
+* Audit logs contain no secrets
+* SMS credentials are masked
+* Production environment variables are documented
+* Security tests pass
+* Build passes
+* TypeScript passes
+* Lint passes
+* Database migrations run successfully
+* Production deployment configuration is documented
+
+---
+
+# 36. DO NOT TAKE SHORTCUTS
+
+Do NOT solve authentication by:
+
+```text
+if (user.role === "admin")
+```
+
+only in React.
+
+Do NOT solve authentication by:
+
+```text
+localStorage.setItem("admin", "true")
+```
+
+Do NOT solve authentication by:
+
+```text
+document.cookie = "admin=true"
+```
+
+Do NOT expose:
+
+```text
+SUPABASE_SERVICE_ROLE_KEY
+SMS_API_KEY
+ADMIN_INITIAL_PASSWORD
+ENCRYPTION_KEY
+```
+
+to the browser.
+
+Do NOT hard-code credentials.
+
+Do NOT trust the client.
+
+The server and database must always be authoritative.
+
+---
+
+# 37. FINAL SECURITY ARCHITECTURE
+
+The final architecture should follow:
+
+```text
+                     USER
+                       │
+                       ▼
+                Next.js Website
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+          MEMBER               ADMIN
+             │                   │
+       Phone OTP            Email + Password
+             │                   │
+             ▼                   ▼
+        Supabase Auth       Supabase Auth
+             │                   │
+             └─────────┬─────────┘
+                       ▼
+              Server-side session
+                       │
+                       ▼
+                Server authorization
+                       │
+                ┌──────┴──────┐
+                │             │
+             MEMBER        ADMIN ROLE
+                │             │
+                ▼             ▼
+             Own data    Authorized data
+                │             │
+                └──────┬──────┘
+                       ▼
+                 Supabase RLS
+                       │
+                       ▼
+                   Database
+```
+
+SMS:
+
+```text
+Member
+  ↓
+Next.js Server
+  ↓
+OTP Generator
+  ↓
+OTP Hash
+  ↓
+SMS Provider
+  ↓
+Bangladeshi Mobile
+```
+
+The SMS provider API key must remain entirely on the server.
+
+---
+
+# 38. IMPORTANT IMPLEMENTATION PRINCIPLE
+
+The application should be designed so that even if a malicious user completely bypasses the frontend UI and manually constructs HTTP requests, they still cannot:
+
+* Become an administrator
+* Read administrator data
+* Read another member's private data
+* Modify book inventory without permission
+* Modify payments without permission
+* Modify system settings
+* Change their own role
+* Change another user's role
+* Bypass borrowing restrictions
+* Manipulate late fees
+* Modify audit logs
+* Obtain SMS credentials
+* Obtain administrator credentials
+
+The security model must therefore be:
+
+**Authentication → Server Authorization → Database RLS**
+
+not:
+
+**Frontend UI → Hidden Buttons → Hope**

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Undergraduate Hub"
+description = "A library membership and book-borrowing web app for undergraduate readers in Dhaka, with member accounts and an operations admin portal."
+version = "1.0.0"
+id = "artifacts/undergraduate-hub"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22722
+
+[services.development]
+run = "pnpm --filter @workspace/undergraduate-hub run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/undergraduate-hub", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/undergraduate-hub/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22722"
+BASE_PATH = "/"
