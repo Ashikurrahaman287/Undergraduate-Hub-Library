@@ -2,6 +2,7 @@ import { createInsertSchema } from "drizzle-zod";
 import {
   boolean,
   date,
+  integer,
   numeric,
   pgEnum,
   pgTable,
@@ -112,6 +113,29 @@ export const adminSessionsTable = pgTable("admin_sessions", {
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const memberSessionsTable = pgTable("member_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull(),
+  memberId: uuid("member_id")
+    .notNull()
+    .references(() => membersTable.id),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const otpChallengesTable = pgTable("otp_challenges", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  phone: text("phone").notNull(),
+  otpHash: text("otp_hash").notNull(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
+  consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  requestIp: text("request_ip"),
 });
 
 export const borrowRequestsTable = pgTable("borrow_requests", {
