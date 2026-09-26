@@ -4,6 +4,7 @@ Book exchange and physical library management for students in Dhaka, with member
 
 ## Run & Operate
 
+- First setup: `pnpm install --frozen-lockfile`, then `pnpm --filter @workspace/db run push` to apply the development schema.
 - `pnpm --filter @workspace/api-server run dev` — run the API server
 - `pnpm --filter @workspace/undergraduate-hub run dev` — run the member and staff web app
 - `pnpm run typecheck` — full typecheck across all packages
