@@ -10,6 +10,7 @@ import {
   otpChallengesTable,
   userRolesTable,
 } from "@workspace/db";
+import { normalizeBangladeshiPhone } from "./phone";
 import { sendOtpSms } from "./services/sms";
 
 export const ADMIN_SESSION_COOKIE = "uh_admin_session";
@@ -184,18 +185,7 @@ function getCookieValue(request: Request, name: string) {
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : undefined;
 }
 
-export function normalizeBangladeshiPhone(value: string) {
-  const compact = value.replace(/[\s()-]/g, "");
-  const local = compact.startsWith("+880")
-    ? `0${compact.slice(4)}`
-    : compact.startsWith("880")
-      ? `0${compact.slice(3)}`
-      : compact;
-  if (!/^01[3-9]\d{8}$/.test(local)) {
-    throw new Error("Enter a valid Bangladeshi mobile number.");
-  }
-  return `+880${local.slice(1)}`;
-}
+export { normalizeBangladeshiPhone } from "./phone";
 
 function isAdminRole(role: string): role is AdminRole {
   return role === "staff" || role === "admin" || role === "super_admin";
