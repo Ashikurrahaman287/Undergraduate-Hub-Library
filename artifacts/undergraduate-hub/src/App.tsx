@@ -34,14 +34,17 @@ import {
 } from 'lucide-react';
 import {
   getGetBookQueryKey,
+  getGetAnalyticsQueryKey,
   getListBooksQueryKey,
   getListBorrowRequestsQueryKey,
   getListMyBooksQueryKey,
+  getListMembersQueryKey,
   getListNotificationsQueryKey,
   getListPaymentsQueryKey,
   getListWishlistQueryKey,
   useCreateBook,
   useCreateBorrowRequest,
+  useCreateMember,
   useGetAnalytics,
   useGetBook,
   useGetDashboard,
@@ -57,10 +60,17 @@ import {
   useRemoveWishlist,
   useRecordPayment,
   useUpdateBook,
+  useUpdateMember,
   useUpdateBorrowRequestStatus,
 } from '@workspace/api-client-react';
 import type { Analytics, Book, BorrowRequest, Dashboard, Member, Payment } from '@workspace/api-client-react';
 import { ErrorBoundary } from '@/components/error-boundary';
+import {
+  AdminCirculationOperations,
+  AdminInventoryOperations,
+  AdminMemberOperations,
+  AdminPaymentOperations,
+} from '@/pages/admin-operations';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
@@ -124,10 +134,10 @@ function Router() {
         <Route path="/requests" component={RequestsPage} />
         <Route path="/account" component={AccountPage} />
         <Route path="/admin" component={AdminDashboard} />
-        <Route path="/admin/books" component={InventoryPage} />
-        <Route path="/admin/requests" component={AdminRequestsPage} />
-        <Route path="/admin/members" component={MembersPage} />
-        <Route path="/admin/payments" component={PaymentsPage} />
+        <Route path="/admin/books" component={AdminInventoryOperations} />
+        <Route path="/admin/requests" component={AdminCirculationOperations} />
+        <Route path="/admin/members" component={AdminMemberOperations} />
+        <Route path="/admin/payments" component={AdminPaymentOperations} />
         <Route path="/admin/analytics" component={AnalyticsPage} />
         <Route component={NotFound} />
       </Switch>
