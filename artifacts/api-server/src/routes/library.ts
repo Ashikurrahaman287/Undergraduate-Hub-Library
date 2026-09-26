@@ -770,129 +770,276 @@ router.patch("/requests/:id/status", requireAdmin("circulation.approve"), async 
     res.status(400).json({ error: "Rejection reason is required." });
     return;
   }
-  const [request] = await db
-    .update(borrowRequestsTable)
-    .set({
-      status: body.status as
-        | "pending"
-        | "approved"
-        | "rejected"
-        | "rescheduled"
-        | "collected"
-        | "returned",
-      pickupDate: body.pickupDate ?? undefined,
-      pickupSlot: body.pickupSlot ?? undefined,
-      dueDate: body.dueDate ?? undefined,
-      note: body.note ?? undefined,
+
+  const [current] = await db
+    .select({
+      request: borrowRequestsTable,
+      book: booksTable,
+      member: membersTable,
+      transaction: transactionsTable,
     })
+    .from(borrowRequestsTable)
+    .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
+    .innerJoin(membersTable, eq(borrowRequestsTable.memberId, membersTable.id))
+    .leftJoin(transactionsTable, eq(borrowRequestsTable.transactionId, transactionsTable.id))
     .where(eq(borrowRequestsTable.id, id))
-    .returning();
-  if (!request) {
+    .limit(1);
+  if (!current) {
     res.status(404).json({ error: "Request not found" });
     return;
   }
-  if (request.transactionId) {
-    const now = new Date();
-    const transactionStatus =
-      body.status === "rescheduled"
-        ? "approved"
-        : body.status === "collected"
-          ? "borrowed"
-          : body.status === "pending"
-            ? "requested"
-            : body.status;
-    const transactionUpdate: Partial<typeof transactionsTable.$inferInsert> = {
-      status: transactionStatus as
-        | "requested"
-        | "approved"
-        | "rejected"
-        | "borrowed"
-        | "returned"
-        | "overdue"
-        | "cancelled",
-      approvedPickupDate:
-        body.status === "approved" || body.status === "rescheduled"
-          ? request.pickupDate
-          : undefined,
-      approvedPickupTime:
-        body.status === "approved" || body.status === "rescheduled"
-          ? slotToTime(request.pickupSlot)
-          : undefined,
-      borrowDate:
-        body.status === "collected" || body.status === "borrowed" ? now : undefined,
-      dueDate:
-        body.status === "collected" || body.status === "borrowed"
-          ? addBorrowingDays(now)
-          : undefined,
-      returnDate: body.status === "returned" ? now : undefined,
-      lateFee:
-        body.status === "returned"
-          ? String(calculateLateFee(request.dueDate, now))
-          : undefined,
-      rejectionReason: body.status === "rejected" ? body.note ?? undefined : undefined,
-      updatedAt: now,
-    };
-    await db
-      .update(transactionsTable)
-      .set(transactionUpdate)
-      .where(eq(transactionsTable.id, request.transactionId));
-    if (body.status === "collected") {
-      await db
-        .update(booksTable)
-        .set({ status: "rented", updatedAt: now })
-        .where(eq(booksTable.id, request.bookId));
+
+  const { request: existingRequest, book, member, transaction } = current;
+  const today = new Date().toISOString().slice(0, 10);
+  const nextStatus = body.status as
+    | "pending"
+    | "approved"
+    | "rejected"
+    | "rescheduled"
+    | "collected"
+    | "returned";
+
+  if (nextStatus === "approved" || nextStatus === "rescheduled") {
+    if (existingRequest.status !== "pending" && existingRequest.status !== "rescheduled") {
+      res.status(409).json({ error: "Only pending requests can be approved or rescheduled." });
+      return;
     }
-    if (body.status === "returned") {
-      await db
-        .update(booksTable)
-        .set({ status: "available", updatedAt: now })
-        .where(eq(booksTable.id, request.bookId));
+    if (book.status !== "available") {
+      res.status(409).json({ error: "This book is no longer available." });
+      return;
     }
-    const [memberForNotification] = await db
-      .select()
-      .from(membersTable)
-      .where(eq(membersTable.id, request.memberId))
-      .limit(1);
-    if (memberForNotification && body.status === "approved") {
-      await sendNotification({
-        memberId: memberForNotification.id,
-        title: "বই নেওয়ার অনুরোধ অনুমোদিত",
-        message: "আপনার বই নেওয়ার অনুরোধটি অনুমোদিত হয়েছে।",
-        type: "request_approved",
-      });
-    }
-    if (memberForNotification && body.status === "rescheduled") {
-      await sendNotification({
-        memberId: memberForNotification.id,
-        title: "Pickup সময় পরিবর্তন হয়েছে",
-        message: `আপনার বই নেওয়ার সময় পরিবর্তন করা হয়েছে। নতুন সময়: ${request.pickupDate}, ${request.pickupSlot}`,
-        type: "request_rescheduled",
-      });
+    if (member.status !== "active" || !member.subscriptionEnd || member.subscriptionEnd < today) {
+      res.status(400).json({ error: "The member must have an active subscription." });
+      return;
     }
   }
-  await recordAudit(`request_${body.status}`, "borrow_request", request.id, {
-    note: body.note ?? null,
+  if (nextStatus === "collected") {
+    if (existingRequest.status !== "approved" && existingRequest.status !== "rescheduled") {
+      res.status(409).json({ error: "Only approved requests can be issued." });
+      return;
+    }
+    if (book.status !== "available") {
+      res.status(409).json({ error: "This book is no longer available." });
+      return;
+    }
+  }
+  if (nextStatus === "returned") {
+    if (existingRequest.status !== "collected") {
+      res.status(409).json({ error: "Only an issued book can be returned." });
+      return;
+    }
+  }
+
+  const now = new Date();
+  const pickupDate = body.pickupDate ?? existingRequest.pickupDate;
+  const pickupSlot = body.pickupSlot ?? existingRequest.pickupSlot;
+  const dueDate = nextStatus === "collected" ? addBorrowingDays(now) : null;
+  const lateFee =
+    nextStatus === "returned"
+      ? calculateLateFee(
+          transaction?.dueDate ??
+            (existingRequest.dueDate ? new Date(`${existingRequest.dueDate}T23:59:59Z`) : null),
+          now,
+        )
+      : undefined;
+
+  await db.transaction(async (tx) => {
+    const [request] = await tx
+      .update(borrowRequestsTable)
+      .set({
+        status: nextStatus,
+        pickupDate,
+        pickupSlot,
+        dueDate: dueDate ? dueDate.toISOString().slice(0, 10) : body.dueDate ?? undefined,
+        note: body.note ?? undefined,
+        updatedAt: now,
+      })
+      .where(eq(borrowRequestsTable.id, id))
+      .returning();
+    if (!request) throw new Error("Request disappeared during update");
+
+    let transactionId = transaction?.id;
+    if (
+      !transactionId &&
+      (nextStatus === "approved" ||
+        nextStatus === "rescheduled" ||
+        nextStatus === "collected" ||
+        nextStatus === "returned")
+    ) {
+      const [createdTransaction] = await tx
+        .insert(transactionsTable)
+        .values({
+          memberId: member.id,
+          bookId: book.id,
+          requestedPickupDate: pickupDate,
+          requestedPickupTime: slotToTime(pickupSlot),
+          approvedPickupDate:
+            nextStatus === "approved" ||
+            nextStatus === "rescheduled" ||
+            nextStatus === "collected"
+              ? pickupDate
+              : undefined,
+          approvedPickupTime:
+            nextStatus === "approved" ||
+            nextStatus === "rescheduled" ||
+            nextStatus === "collected"
+              ? slotToTime(pickupSlot)
+              : undefined,
+          borrowDate:
+            nextStatus === "collected"
+              ? now
+              : nextStatus === "returned"
+                ? existingRequest.createdAt
+                : undefined,
+          dueDate:
+            dueDate ??
+            (nextStatus === "returned" && existingRequest.dueDate
+              ? new Date(`${existingRequest.dueDate}T23:59:59Z`)
+              : undefined),
+          returnDate: nextStatus === "returned" ? now : undefined,
+          lateFee: lateFee === undefined ? undefined : String(lateFee),
+          status:
+            nextStatus === "collected"
+              ? "borrowed"
+              : nextStatus === "returned"
+                ? "returned"
+                : "approved",
+        })
+        .returning();
+      transactionId = createdTransaction.id;
+      await tx
+        .update(borrowRequestsTable)
+        .set({ transactionId, updatedAt: now })
+        .where(eq(borrowRequestsTable.id, id));
+    }
+
+    if (transactionId) {
+      const transactionStatus =
+        nextStatus === "rescheduled"
+          ? "approved"
+          : nextStatus === "collected"
+            ? "borrowed"
+            : nextStatus === "pending"
+              ? "requested"
+              : nextStatus;
+      await tx
+        .update(transactionsTable)
+        .set({
+          status: transactionStatus as
+            | "requested"
+            | "approved"
+            | "rejected"
+            | "borrowed"
+            | "returned"
+            | "overdue"
+            | "cancelled",
+          approvedPickupDate:
+            nextStatus === "approved" || nextStatus === "rescheduled" ? pickupDate : undefined,
+          approvedPickupTime:
+            nextStatus === "approved" || nextStatus === "rescheduled"
+              ? slotToTime(pickupSlot)
+              : undefined,
+          borrowDate: nextStatus === "collected" ? now : undefined,
+          dueDate: dueDate ?? undefined,
+          returnDate: nextStatus === "returned" ? now : undefined,
+          lateFee: lateFee === undefined ? undefined : String(lateFee),
+          rejectionReason: nextStatus === "rejected" ? body.note ?? undefined : undefined,
+          updatedAt: now,
+        })
+        .where(eq(transactionsTable.id, transactionId));
+    }
+
+    if (nextStatus === "collected") {
+      await tx
+        .update(booksTable)
+        .set({ status: "rented", updatedAt: now })
+        .where(and(eq(booksTable.id, book.id), eq(booksTable.status, "available")));
+    }
+    if (nextStatus === "returned") {
+      await tx
+        .update(booksTable)
+        .set({ status: "available", updatedAt: now })
+        .where(eq(booksTable.id, book.id));
+      await tx
+        .update(membersTable)
+        .set({
+          totalBooksRead: sql`${membersTable.totalBooksRead} + 1`,
+          outstandingFees:
+            lateFee && lateFee > 0
+              ? sql`${membersTable.outstandingFees} + ${String(lateFee)}`
+              : undefined,
+          updatedAt: now,
+        })
+        .where(eq(membersTable.id, member.id));
+    }
+    await tx.insert(auditLogsTable).values({
+      action: `request_${nextStatus}`,
+      entityType: "borrow_request",
+      entityId: id,
+      metadata: JSON.stringify({
+        bookId: book.id,
+        memberId: member.id,
+        lateFee: lateFee ?? 0,
+        note: body.note ?? null,
+      }),
+    });
   });
-  const [book] = await db.select().from(booksTable).where(eq(booksTable.id, request.bookId));
-  const [member] = await db
+
+  if (nextStatus === "approved") {
+    await sendNotification({
+      memberId: member.id,
+      title: "বই নেওয়ার অনুরোধ অনুমোদিত",
+      message: "আপনার বই নেওয়ার অনুরোধটি অনুমোদিত হয়েছে।",
+      type: "request_approved",
+    });
+  }
+  if (nextStatus === "rescheduled") {
+    await sendNotification({
+      memberId: member.id,
+      title: "Pickup সময় পরিবর্তন হয়েছে",
+      message: `আপনার বই নেওয়ার সময় পরিবর্তন করা হয়েছে। নতুন সময়: ${pickupDate}, ${pickupSlot}`,
+      type: "request_rescheduled",
+    });
+  }
+  if (nextStatus === "collected") {
+    await sendNotification({
+      memberId: member.id,
+      title: "বই issue করা হয়েছে",
+      message: `আপনার কাছে বইটি issue করা হয়েছে। ফেরতের তারিখ ${dueDate?.toISOString().slice(0, 10)}।`,
+      type: "book_issued",
+    });
+  }
+  if (nextStatus === "returned") {
+    await sendNotification({
+      memberId: member.id,
+      title: "বই ফেরত গ্রহণ করা হয়েছে",
+      message:
+        lateFee && lateFee > 0
+          ? `বই ফেরত নেওয়া হয়েছে। বর্তমান late fee ৳${lateFee}।`
+          : "বই ফেরত নেওয়া হয়েছে। ধন্যবাদ।",
+      type: "book_returned",
+    });
+  }
+
+  const [updatedRequest] = await db
     .select()
-    .from(membersTable)
-    .where(eq(membersTable.id, request.memberId))
+    .from(borrowRequestsTable)
+    .where(eq(borrowRequestsTable.id, id))
     .limit(1);
-  const [transaction] = request.transactionId
+  const [updatedTransaction] = updatedRequest?.transactionId
     ? await db
         .select()
         .from(transactionsTable)
-        .where(eq(transactionsTable.id, request.transactionId))
+        .where(eq(transactionsTable.id, updatedRequest.transactionId))
         .limit(1)
     : [undefined];
   res.json(
     mapBorrowRequest(
-      request,
-      book?.title ?? "Book",
-      member?.name ?? "Member",
+      updatedRequest ?? existingRequest,
+      book.title,
+      member.name,
       member,
-      transaction,
+      updatedTransaction,
     ),
   );
 });
@@ -916,6 +1063,10 @@ router.post("/members", requireAdmin("members.create"), async (req, res) => {
     res.status(400).json({ error: "Name, phone, and university are required." });
     return;
   }
+  if (body.subscriptionPlan !== undefined && ![29, 49].includes(body.subscriptionPlan)) {
+    res.status(400).json({ error: "Subscription plan must be 29 or 49 BDT." });
+    return;
+  }
   const [{ count: memberCount }] = await db
     .select({ count: count() })
     .from(membersTable);
@@ -934,6 +1085,10 @@ router.post("/members", requireAdmin("members.create"), async (req, res) => {
       plan: `${plan} BDT`,
     })
     .returning();
+  await recordAudit("member_created", "member", member.id, {
+    name: member.name,
+    subscriptionPlan: plan,
+  });
   res.status(201).json(mapMember(member));
 });
 
@@ -950,6 +1105,18 @@ router.patch("/members/:id", requireAdmin("members.update"), async (req, res) =>
     depositStatus?: string;
     status?: string;
   };
+  if (body.status !== undefined && !["active", "expired", "suspended"].includes(body.status)) {
+    res.status(400).json({ error: "Invalid member status." });
+    return;
+  }
+  if (body.depositStatus !== undefined && !["paid", "unpaid", "partially_paid", "waived"].includes(body.depositStatus)) {
+    res.status(400).json({ error: "Invalid deposit status." });
+    return;
+  }
+  if (body.subscriptionPlan !== undefined && ![29, 49].includes(body.subscriptionPlan)) {
+    res.status(400).json({ error: "Subscription plan must be 29 or 49 BDT." });
+    return;
+  }
   const [member] = await db
     .update(membersTable)
     .set({
@@ -974,6 +1141,11 @@ router.patch("/members/:id", requireAdmin("members.update"), async (req, res) =>
     res.status(404).json({ error: "Member not found" });
     return;
   }
+  await recordAudit("member_updated", "member", member.id, {
+    changedStatus: body.status ?? null,
+    changedDepositStatus: body.depositStatus ?? null,
+    changedPlan: body.subscriptionPlan ?? null,
+  });
   res.json(mapMember(member));
 });
 
@@ -1002,20 +1174,104 @@ router.get("/payments", requireAdmin("payments.view"), async (_req, res) => {
 router.post("/payments", requireAdmin("payments.create"), async (req, res) => {
   await ensureSeedData();
   const body = RecordPaymentBody.parse(req.body);
-  const [payment] = await db
-    .insert(paymentsTable)
-    .values({
-      memberId: body.memberId,
-      amount: String(body.amount),
-      method: body.method as "cash" | "bkash" | "nagad",
-      type: body.type,
-      referenceNumber: body.reference,
-    })
-    .returning();
-  const [member] = await db.select().from(membersTable).where(eq(membersTable.id, body.memberId));
+  if (body.amount <= 0) {
+    res.status(400).json({ error: "Payment amount must be greater than zero." });
+    return;
+  }
+  if (!["cash", "bkash", "nagad"].includes(body.method)) {
+    res.status(400).json({ error: "Payment method must be cash, bkash, or nagad." });
+    return;
+  }
+  if (!["subscription", "deposit", "late_fee", "lost_book", "damage_fee", "other"].includes(body.type)) {
+    res.status(400).json({ error: "Invalid payment type." });
+    return;
+  }
+  const [existingMember] = await db
+    .select()
+    .from(membersTable)
+    .where(eq(membersTable.id, body.memberId))
+    .limit(1);
+  if (!existingMember) {
+    res.status(404).json({ error: "Member not found." });
+    return;
+  }
+
+  const today = new Date();
+  const todayString = today.toISOString().slice(0, 10);
+  const subscriptionEnd =
+    body.type === "subscription"
+      ? new Date(
+          Math.max(
+            today.getTime(),
+            existingMember.subscriptionEnd
+              ? new Date(`${existingMember.subscriptionEnd}T23:59:59Z`).getTime()
+              : today.getTime(),
+          ) +
+            30 * 86400000,
+        )
+          .toISOString()
+          .slice(0, 10)
+      : undefined;
+  const nextDepositStatus =
+    body.type === "deposit"
+      ? body.amount >= money(existingMember.depositAmount)
+        ? "paid"
+        : "partially_paid"
+      : undefined;
+  const addsOutstandingFee = ["late_fee", "lost_book", "damage_fee"].includes(body.type);
+
+  const result = await db.transaction(async (tx) => {
+    const [payment] = await tx
+      .insert(paymentsTable)
+      .values({
+        memberId: body.memberId,
+        amount: String(body.amount),
+        method: body.method as "cash" | "bkash" | "nagad",
+        type: body.type,
+        referenceNumber: body.reference,
+      })
+      .returning();
+    const [member] = await tx
+      .update(membersTable)
+      .set({
+        depositStatus: nextDepositStatus,
+        subscriptionStart:
+          body.type === "subscription" && !existingMember.subscriptionStart
+            ? todayString
+            : undefined,
+        subscriptionEnd,
+        status: body.type === "subscription" ? "active" : undefined,
+        outstandingFees: addsOutstandingFee
+          ? sql`${membersTable.outstandingFees} - LEAST(${membersTable.outstandingFees}, ${String(body.amount)})`
+          : undefined,
+        updatedAt: today,
+      })
+      .where(eq(membersTable.id, body.memberId))
+      .returning();
+    await tx.insert(auditLogsTable).values({
+      action: "payment_recorded",
+      entityType: "payment",
+      entityId: payment.id,
+      metadata: JSON.stringify({
+        memberId: body.memberId,
+        amount: body.amount,
+        type: body.type,
+        method: body.method,
+      }),
+    });
+    return { payment, member };
+  });
+
+  const { payment, member } = result;
+  await sendNotification({
+    memberId: body.memberId,
+    title: "Payment recorded",
+    message: `আপনার ${body.type} payment ৳${body.amount} রেকর্ড করা হয়েছে।`,
+    type: "payment",
+  });
   res.status(201).json({
     id: payment.id,
-    memberName: member?.name ?? "Member",
+    memberName: member?.name ?? existingMember.name,
     amount: money(payment.amount),
     method: payment.method,
     type: payment.type,

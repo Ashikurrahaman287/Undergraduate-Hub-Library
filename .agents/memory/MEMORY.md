@@ -1,1 +1,2 @@
 - [Supabase production boundary](supabase-dev-boundary.md) — local development stays credential-free while hosted auth/RLS follows the Supabase migration.
+- [Library operations data integrity](library-operations.md) — circulation must backfill legacy transaction links before a return can update history safely.
