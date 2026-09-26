@@ -1,0 +1,1471 @@
+UNDERGRADUATE HUB — PRODUCTION ADMIN, AUTHENTICATION & BUSINESS OPERATIONS UPGRADE
+
+You are continuing development of the existing Undergraduate Hub Book Exchange & Physical Library Management System.
+
+DO NOT rebuild the application from scratch.
+
+First inspect the existing codebase, database schema, Supabase configuration, authentication, routes, components, middleware, server actions, API routes, and existing business logic.
+
+Then implement the requirements below while preserving all existing working functionality.
+
+The application must remain production-ready, secure, mobile-first, Vercel-ready, and Supabase-compatible.
+
+1. ADMIN PANEL MUST BE SEPARATE FROM THE MEMBER WEBSITE
+
+The public/member website must NEVER expose the Admin Dashboard directly.
+
+The main website should contain only member-facing functionality such as:
+
+Home
+Search
+Books
+Book Details
+My Books
+Wishlist
+Notifications
+Profile
+Subscription
+Login/Register
+
+Do NOT show:
+
+Admin dashboard
+Admin statistics
+Admin member management
+Admin payments
+Admin books management
+Admin circulation
+Admin settings
+Admin analytics
+Admin configuration
+
+to normal members.
+
+2. ADMIN PANEL ACCESS
+
+Create a dedicated admin area:
+
+/admin
+
+The Admin Panel must have its own secure login page:
+
+/admin/login
+
+Normal members must not be able to access /admin/*.
+
+If an unauthenticated user visits:
+
+/admin
+
+redirect them to:
+
+/admin/login
+
+If a normal authenticated member attempts to access:
+
+/admin/*
+
+return a proper unauthorized response or redirect them away.
+
+DO NOT rely only on hiding the admin link from the UI.
+
+Enforce admin authorization through:
+
+Supabase Auth
+Server-side role checks
+Supabase Row Level Security
+Middleware/protected routes
+Server Actions/API authorization
+3. ADMIN ACCESS UI
+
+Add a small, discreet Admin Access option in the website's top dropdown/menu.
+
+For example:
+
+Account / Menu
+↓
+Admin Panel
+
+However:
+
+Do NOT display admin functionality to normal members.
+If the user is not an admin, the Admin Panel option can either be hidden or show an appropriate access-denied response.
+Never expose admin data through client-side API calls.
+
+The admin dashboard itself should have a separate responsive layout.
+
+4. ADMIN PASSWORD SECURITY
+
+The initial administrator credential supplied during development is:
+
+Ashik98765432100987#$@@
+
+IMPORTANT SECURITY REQUIREMENT:
+
+DO NOT hard-code this password into frontend code.
+
+DO NOT store the plaintext password in Git.
+
+DO NOT expose the password through browser JavaScript.
+
+Use secure environment variables and Supabase Auth.
+
+Recommended configuration:
+
+ADMIN_INITIAL_PASSWORD
+
+or equivalent secure server-side environment variable.
+
+The application should support changing/resetting the administrator password.
+
+The production README must clearly explain how to configure the initial admin credentials.
+
+If Supabase Auth is used for admin authentication, create the admin account through the secure Supabase authentication system rather than implementing a custom plaintext password system.
+
+5. ADMIN ROLE SYSTEM
+
+Create a proper role system.
+
+Minimum roles:
+
+member
+admin
+
+Preferably structure it so additional roles can be added later:
+
+member
+staff
+admin
+super_admin
+
+For the current version, only:
+
+member
+admin
+
+are required.
+
+Admin privileges must be checked server-side.
+
+Do NOT trust:
+
+localStorage
+cookies created manually by the frontend
+hidden buttons
+frontend role variables
+
+for authorization.
+
+6. MEMBER LOGIN SYSTEM
+
+Upgrade member authentication.
+
+Members should be able to authenticate using:
+
+Option A — Email + Password
+
+Fields:
+
+Email
+Password
+
+Option B — Email OTP
+
+Members should also be able to choose:
+
+"Login with Email OTP"
+
+Flow:
+
+Member enters email.
+System validates email.
+System sends OTP.
+Member enters OTP.
+System verifies OTP.
+Member is authenticated.
+Member is redirected to the member dashboard/home.
+
+Use Supabase Auth's supported OTP/magic-link functionality rather than creating an insecure custom OTP system.
+
+Add:
+
+Resend OTP
+
+with a cooldown timer.
+
+Example:
+
+Resend OTP in 45 seconds
+
+Prevent OTP spam.
+
+7. EMAIL CONFIGURATION
+
+Create a dedicated Admin Settings page:
+
+/admin/settings/email
+
+Also make it accessible from:
+
+Admin Panel
+→ Settings
+→ Email Configuration
+
+The purpose is to allow the administrator to configure the email service used by the application.
+
+The administrator wants to use a personal Yahoo Mail account for sending OTP/notification emails.
+
+IMPORTANT:
+
+Yahoo account passwords and app passwords must NEVER be stored in frontend code.
+
+Do NOT display the actual configured password after saving.
+
+Use secure server-side environment variables or another encrypted server-side configuration mechanism.
+
+Example environment variables:
+
+EMAIL_PROVIDER=yahoo
+EMAIL_HOST=smtp.mail.yahoo.com
+EMAIL_PORT=465
+EMAIL_SECURE=true
+EMAIL_USERNAME=
+EMAIL_APP_PASSWORD=
+EMAIL_FROM_NAME=Undergraduate Hub
+EMAIL_FROM_ADDRESS=
+
+The Admin Panel may provide a configuration form for:
+
+Email Provider
+SMTP Host
+SMTP Port
+SMTP Username
+SMTP App Password
+From Name
+From Email
+
+But credentials must be processed server-side.
+
+Do not expose:
+
+EMAIL_APP_PASSWORD
+
+to the browser after submission.
+
+8. EMAIL SETTINGS PAGE
+
+Build a professional admin interface.
+
+Page:
+
+/admin/settings/email
+
+Sections:
+
+Email Provider
+
+Provider:
+Yahoo Mail
+
+SMTP Configuration
+
+SMTP Host
+SMTP Port
+Encryption
+Username
+App Password
+
+Sender Information
+
+Sender Name
+Sender Email
+
+Email Features
+
+Enable/disable:
+
+Member OTP
+Borrow Approval Email
+Borrow Rejection Email
+Pickup Reschedule Email
+Due Date Reminder
+Overdue Notification
+Payment Confirmation
+Subscription Confirmation
+General Admin Notification
+
+Test Email
+
+Add:
+
+Send Test Email
+
+Admin enters a test email address.
+
+The server sends a test email.
+
+Display:
+
+✓ Test email sent successfully
+
+or
+
+✕ Email sending failed
+
+Do not expose SMTP credentials in the error message.
+
+9. EMAIL SERVICE ARCHITECTURE
+
+Create a reusable email service abstraction.
+
+For example:
+
+sendEmail()
+
+sendOTPEmail()
+
+sendBorrowApprovalEmail()
+
+sendBorrowRejectionEmail()
+
+sendPickupRescheduleEmail()
+
+sendDueReminderEmail()
+
+sendOverdueEmail()
+
+sendPaymentConfirmationEmail()
+
+sendSubscriptionEmail()
+
+Do not hard-code Yahoo-specific logic throughout the application.
+
+The architecture must allow future providers such as:
+
+Gmail
+Resend
+SendGrid
+Amazon SES
+Brevo
+Mailgun
+
+without rewriting the application.
+
+10. OTP SECURITY
+
+Implement proper OTP security.
+
+Requirements:
+
+OTP expiration
+Maximum verification attempts
+Resend cooldown
+Rate limiting
+One-time use
+Secure server-side verification
+Never log OTP values
+Never store plaintext OTP unnecessarily
+Do not expose OTP in API responses
+Do not expose OTP in frontend state beyond what is required for input
+
+Suggested:
+
+OTP expiration:
+10 minutes
+
+Resend cooldown:
+45–60 seconds
+
+Maximum failed attempts:
+5
+
+Add protection against repeated OTP requests from the same IP/account.
+
+11. ADMIN DASHBOARD
+
+Improve the existing Admin Dashboard.
+
+Route:
+
+/admin
+
+Show:
+
+Total Books
+Available Books
+Currently Borrowed
+Overdue Books
+Lost Books
+Total Members
+Active Members
+Suspended Members
+Active Subscriptions
+Expired Subscriptions
+Pending Requests
+Today's Borrowing
+Today's Returns
+This Month's Revenue
+Outstanding Late Fees
+Outstanding Deposits
+
+Add charts for:
+
+Books Borrowed
+Books Returned
+New Members
+Subscription Revenue
+Late Fees
+Popular Books
+Popular Categories
+University Distribution
+
+Charts must remain usable on mobile.
+
+12. ADMIN SIDEBAR
+
+Create a professional responsive Admin navigation.
+
+Sections:
+
+Dashboard
+
+Library
+
+Books
+Add Book
+CSV Import
+QR Codes
+
+Members
+
+All Members
+Active Members
+Suspended Members
+
+Circulation
+
+Borrow Requests
+Currently Borrowed
+Overdue
+Returns
+Lost Books
+
+Payments
+
+Payments
+Subscription Payments
+Deposits
+Late Fees
+
+Communication
+
+Notifications
+Email
+
+Analytics
+
+Reports
+Statistics
+
+Settings
+
+General
+Email
+Subscription
+Library Rules
+Admin Users
+
+Logout
+
+On mobile, use a drawer/sheet navigation.
+
+13. ADMIN SETTINGS
+
+Create:
+
+/admin/settings
+
+with configuration sections.
+
+General Settings
+
+Business Name:
+Undergraduate Hub
+
+Tagline:
+Your Books. Your Knowledge. Your Community.
+
+Phone
+Email
+Address
+Opening Hours
+
+Library Rules
+
+Borrowing period:
+30/days
+
+Late fee:
+9 BDT/day ( IF User have Book but haven't paid the Subscription Fee ) 
+
+Default deposit: Depends
+
+Maximum active books:
+1
+
+Subscription
+
+First member tier:
+First 300 members
+
+Price:
+29 BDT
+
+After 300 members:
+49 BDT
+
+Allow manual override:
+YES
+
+Notification Settings
+
+Enable/disable different notifications.
+
+Email Settings
+
+Link to:
+
+/admin/settings/email
+
+14. BUSINESS OPERATIONS FEATURES
+
+Add all practical functionality required to operate the physical library smoothly.
+
+The system should not only manage books.
+
+It must help staff operate the physical business.
+
+Add:
+
+Member registration
+Member verification
+Subscription management
+Deposit management
+Borrow request management
+Book issue
+Book return
+Overdue tracking
+Late fee tracking
+Lost book management
+Damaged book management
+Payment records
+Staff notes
+Notifications
+Audit logs
+Reports
+CSV import/export
+QR book identification
+Search
+Filters
+Activity history
+15. MEMBER VERIFICATION
+
+Add a member verification/status system.
+
+Member status:
+
+Pending
+Active
+Suspended
+Expired
+
+Admin should be able to:
+
+Approve member
+Suspend member
+Reactivate member
+Extend subscription
+Change subscription
+Add staff note
+
+Do not allow suspended members to create new borrow requests.
+
+16. MEMBER ID
+
+Generate a unique member ID.
+
+Example:
+
+UH-000001
+UH-000002
+UH-000003
+
+The member ID must be unique.
+
+Display it in:
+
+Profile
+Admin member page
+Borrow transactions
+Payment records
+
+Optionally generate a QR code for the member ID in the future.
+
+17. MEMBER PROFILE
+
+Improve the member profile.
+
+Display:
+
+Member ID
+Name
+Email
+Phone
+University
+Student ID
+Account Status
+Subscription
+Subscription Expiry
+Deposit
+Current Book
+Outstanding Late Fee
+Total Books Read
+
+Add:
+
+Edit Profile
+
+Members should only be able to edit fields that are safe to edit.
+
+Sensitive fields should require admin approval.
+
+18. ADMIN MEMBER PROFILE
+
+Admin member profile should include:
+
+Basic Information
+Subscription
+Deposit
+Current Book
+Borrowing History
+Payment History
+Late Fees
+Staff Notes
+Account Activity
+Notifications
+
+Actions:
+
+Suspend
+Activate
+Extend Subscription
+Change Plan
+Record Payment
+Record Deposit
+Add Note
+View History
+
+19. PAYMENT MANAGEMENT
+
+Improve offline payment management.
+
+Supported methods:
+
+Cash
+bKash
+Nagad
+
+Payment types:
+
+Subscription
+Deposit
+Late Fee
+Lost Book
+Damage Fee
+Other
+
+Each payment should have:
+
+Payment ID
+Member
+Amount
+Type
+Method
+Reference
+Collected By
+Date
+Status
+Notes
+
+Generate a printable/downloadable receipt.
+
+20. PAYMENT RECEIPTS
+
+After recording a payment:
+
+Show:
+
+Payment successful
+
+Generate:
+
+Payment Receipt
+
+Receipt should contain:
+
+Undergraduate Hub
+Member Name
+Member ID
+Payment ID
+Amount
+Payment Type
+Payment Method
+Reference
+Date
+Collected By
+
+Allow:
+
+Print
+Download PDF
+
+21. SUBSCRIPTION AUTOMATION
+
+Implement automatic subscription status calculation.
+
+Subscription should have:
+
+Start Date
+End Date
+Plan
+Price
+Status
+
+Automatically identify:
+
+Active
+Expiring Soon
+Expired
+
+Example:
+
+If subscription expires within 3 days:
+
+Show warning notification.
+
+If expired:
+
+Block new borrow requests.
+
+22. DUE DATE REMINDERS
+
+Create automated reminders.
+
+For example:
+
+3 days before due date
+
+1 day before due date
+
+On due date
+
+After becoming overdue
+
+Internal notifications are mandatory.
+
+Email notifications should be supported when email configuration is enabled.
+
+Do not send duplicate notifications repeatedly.
+
+23. OVERDUE AUTOMATION
+
+Automatically identify overdue transactions.
+
+Calculate:
+
+late_days × 9 BDT
+
+Do not rely on manually entered late fees.
+
+Display current calculated amount.
+
+Example:
+
+3 days overdue
+Late fee: ৳27
+
+The amount should update automatically with time.
+
+24. BOOK CONDITION MANAGEMENT
+
+Improve book condition tracking.
+
+Condition:
+
+Excellent
+Good
+Fair
+Damaged
+Lost
+
+Admin can add:
+
+Condition Note
+
+When returning a book, admin should be able to update its condition.
+
+25. LOST BOOK MANAGEMENT
+
+If a member loses a book:
+
+Mark book:
+
+Lost
+
+Record:
+
+Book
+Member
+Original Price
+Penalty
+Date
+Staff Note
+
+Default penalty:
+
+Original Book Price
+
+Admin can override the amount.
+
+Create an outstanding payment requirement.
+
+26. AUDIT LOG
+
+Every important administrative action must be recorded.
+
+Examples:
+
+Admin logged in
+Book created
+Book edited
+Book deleted
+Book marked lost
+Member suspended
+Member activated
+Payment recorded
+Subscription changed
+Borrow approved
+Borrow rejected
+Borrow rescheduled
+Book returned
+Late fee modified
+Settings changed
+Email configuration changed
+
+Audit record:
+
+Admin
+Action
+Entity
+Entity ID
+Timestamp
+Metadata
+
+Never store sensitive passwords or app passwords in audit logs.
+
+27. BUSINESS REPORTS
+
+Create:
+
+/admin/reports
+
+Reports:
+
+Daily
+Weekly
+Monthly
+Yearly
+
+Include:
+
+Books borrowed
+Books returned
+New members
+Active members
+Subscription revenue
+Deposit collection
+Late fees
+Lost book penalties
+Total collection
+
+Allow:
+
+CSV export
+PDF export
+
+28. DAILY OPERATIONS DASHBOARD
+
+Create a simple "Today's Operations" section.
+
+Admin should immediately see:
+
+Today's Pickup Requests
+Today's Books to Issue
+Today's Returns
+Overdue Books
+Payments Collected Today
+Subscriptions Expiring Soon
+
+This should help staff operate the physical library without navigating through multiple pages.
+
+29. QUICK ACTIONS
+
+Add dashboard buttons:
+
+Add Book
+Add Member
+Approve Requests
+Issue Book
+Return Book
+Record Payment
+Import CSV
+Generate QR
+Send Notification
+30. SEARCH EVERYTHING
+
+Admin should have fast search.
+
+Search:
+
+Books
+Members
+Phone
+Email
+Member ID
+ISBN
+QR Code
+Transaction ID
+Payment ID
+
+Use PostgreSQL indexes where appropriate.
+
+31. QR QUICK ACTION SYSTEM
+
+When staff scans a book QR code:
+
+Open:
+
+/books/{book-id}
+
+If the scanner/user is authenticated as staff/admin, provide quick actions:
+
+View Book
+Issue Book
+Return Book
+View Borrower
+Mark Lost
+View History
+
+Normal members should only receive the normal book details page.
+
+32. NOTIFICATION CENTER
+
+Create notification center for members.
+
+Member navigation should include notification icon.
+
+Show unread count.
+
+Notifications:
+
+Borrow Approved
+Borrow Rejected
+Pickup Rescheduled
+Book Due Soon
+Overdue
+Payment
+Subscription
+Wishlist Book Available
+General
+
+Allow:
+
+Mark as read
+Mark all as read
+
+33. ADMIN NOTIFICATIONS
+
+Admin should receive operational alerts for:
+
+New borrow request
+Overdue book
+Payment recorded
+Lost book
+New member
+Subscription issue
+Email sending failure
+
+34. EMAIL FAILURE HANDLING
+
+If email configuration is missing or incorrect:
+
+The application must NOT crash.
+
+Internal notifications should continue working.
+
+Admin should see:
+
+"Email service is not configured."
+
+Admin settings should show:
+
+Email Status:
+Configured
+Not Configured
+Connection Error
+
+Do not expose SMTP passwords or sensitive connection information.
+
+35. SECURITY HARDENING
+
+Before considering the project complete, perform a security review.
+
+Check:
+
+Supabase RLS
+Admin authorization
+Member authorization
+Server Actions
+API routes
+File uploads
+CSV uploads
+Authentication
+OTP
+Rate limiting
+CSRF considerations
+XSS protection
+SQL injection protection
+Environment variables
+Storage policies
+Admin routes
+Error messages
+Logging
+
+Never expose:
+
+SUPABASE_SERVICE_ROLE_KEY
+SMTP password
+Yahoo App Password
+private API keys
+JWT secrets
+
+to the client.
+
+36. ENVIRONMENT VARIABLES
+
+Create/update:
+
+.env.example
+
+Include placeholders such as:
+
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+
+SUPABASE_SERVICE_ROLE_KEY=
+
+EMAIL_PROVIDER=
+EMAIL_HOST=
+EMAIL_PORT=
+EMAIL_SECURE=
+EMAIL_USERNAME=
+EMAIL_APP_PASSWORD=
+EMAIL_FROM_NAME=
+EMAIL_FROM_ADDRESS=
+
+ADMIN_INITIAL_PASSWORD=
+
+Any secret must remain server-side.
+
+37. DATABASE MIGRATIONS
+
+Do not manually modify production tables without migrations.
+
+Create proper Supabase migration files for:
+
+Roles
+Members
+Books
+Transactions
+Payments
+Subscriptions
+Notifications
+Wishlists
+Audit Logs
+Settings
+Email configuration metadata
+Member IDs
+Payment receipts
+Any new required tables
+
+Add:
+
+Indexes
+Foreign keys
+Constraints
+Triggers/functions
+RLS policies
+
+where appropriate.
+
+38. DATABASE INTEGRITY
+
+Prevent:
+
+Duplicate members
+Duplicate wishlist entries
+Duplicate QR codes
+Invalid payment amounts
+Invalid subscription dates
+Multiple active books for one member
+Borrowing unavailable books
+Unauthorized admin actions
+
+Use database constraints wherever possible.
+
+39. UI LANGUAGE
+
+Use a Bangla + English mixed interface.
+
+Use formal Bangla:
+
+আপনি
+আপনার
+বই ধার নিন
+অনুরোধ পাঠান
+বই ফেরত দেওয়ার তারিখ
+আপনার subscription
+আপনার payment
+অনুরোধটি Admin-এর অনুমোদনের অপেক্ষায় আছে।
+
+Avoid informal "তুমি" language.
+
+Keep important technical/admin terminology understandable in English where appropriate.
+
+40. MOBILE EXPERIENCE
+
+The member application should be designed primarily for Android/mobile browsers.
+
+Use:
+
+Bottom navigation
+Large touch targets
+Sticky search
+Responsive cards
+Mobile sheets
+Mobile dialogs
+Fast loading
+Optimized images
+
+Admin dashboard should also work on mobile, but desktop can have a richer sidebar layout.
+
+41. PWA
+
+Maintain the existing PWA requirements.
+
+Ensure:
+
+manifest
+icons
+service worker
+installable application
+offline shell
+theme colors
+mobile-friendly viewport
+
+Do not pretend that authenticated data works fully offline if the user has no connection.
+
+Clearly distinguish:
+
+Offline cached interface
+
+from
+
+Live database operations.
+
+42. BACKUPS AND BUSINESS SAFETY
+
+Add documentation for:
+
+Supabase database backups
+CSV book export
+Member data export
+Payment data export
+Audit logs
+
+Admin should be able to export important business data.
+
+At minimum provide:
+
+Export Books CSV
+Export Members CSV
+Export Payments CSV
+Export Transactions CSV
+
+43. PRODUCTION ERROR MONITORING
+
+Create a centralized server-side logging strategy.
+
+Do not expose technical stack traces to members.
+
+Member sees:
+
+"কিছু সমস্যা হয়েছে। আবার চেষ্টা করুন।"
+
+Admin/developer logs should contain useful diagnostic information without exposing secrets.
+
+Design the system so an external monitoring service such as Sentry can be added later.
+
+44. PERFORMANCE
+
+The system must support approximately 1,200+ books.
+
+Do not load all books at once.
+
+Use:
+
+Server-side pagination
+Database filtering
+Indexes
+Optimized images
+Lazy loading
+Caching where appropriate
+
+Avoid unnecessary client-side database requests.
+
+45. DO NOT BREAK EXISTING FEATURES
+
+Before making changes:
+
+Inspect the current application.
+Identify existing functionality.
+Preserve existing routes where possible.
+Reuse existing components.
+Reuse existing Supabase schema where appropriate.
+Create migrations for schema changes.
+Do not duplicate tables unnecessarily.
+Do not create a second authentication system.
+Do not create a separate backend unless absolutely necessary.
+46. TESTING REQUIREMENTS
+
+Before declaring the application complete, test:
+
+Authentication
+
+Member email/password login
+Member OTP login
+OTP expiration
+OTP resend
+Admin login
+Unauthorized admin access
+
+Books
+
+Search
+Filter
+Pagination
+Book details
+Wishlist
+QR
+
+Borrowing
+
+Request
+Approval
+Rejection
+Rescheduling
+Issue
+Return
+Overdue
+Late fee
+
+Payments
+
+Cash
+bKash
+Nagad
+Receipt
+Payment history
+
+Subscription
+
+29 BDT tier
+49 BDT tier
+Manual override
+Expiration
+Renewal
+
+Admin
+
+Books
+Members
+Payments
+Circulation
+Reports
+Settings
+Email configuration
+
+Security
+
+Member → /admin blocked
+Member → other member data blocked
+Admin → protected data allowed
+Service-role key not exposed
+SMTP credentials not exposed
+
+47. EMAIL TESTING
+
+Create an admin-only:
+
+"Send Test Email"
+
+feature.
+
+Test:
+
+OTP
+General notification
+Borrow approval
+Due reminder
+
+If Yahoo SMTP fails, display a safe diagnostic such as:
+
+"Unable to connect to the configured email service. Check SMTP host, port, username, and App Password."
+
+Never display the actual password.
+
+48. ADMIN LOGIN UX
+
+Admin login should be simple and professional.
+
+Show:
+
+Undergraduate Hub
+Admin Portal
+
+Email
+Password
+Remember session
+Login
+
+Forgot Password
+
+Use proper Supabase Auth password recovery.
+
+Add loading states.
+
+Add friendly error messages.
+
+49. ADMIN SESSION SECURITY
+
+Admin sessions must:
+
+Use secure authentication
+Respect Supabase session expiration
+Support logout
+Protect sensitive routes
+Avoid storing passwords in localStorage
+Avoid exposing access tokens unnecessarily
+
+50. FINAL PRODUCTION CHECK
+
+Before saying "COMPLETE", verify all of the following:
+
+[ ] Member website does not expose admin dashboard
+[ ] Admin panel exists at /admin
+[ ] Admin login exists
+[ ] Admin role is enforced server-side
+[ ] RLS protects database
+[ ] Member authentication supports email/password
+[ ] Member authentication supports email OTP
+[ ] OTP rate limiting exists
+[ ] Email service abstraction exists
+[ ] Yahoo SMTP configuration exists
+[ ] Email credentials remain server-side
+[ ] Admin can test email
+[ ] Borrowing rules work
+[ ] One-book-at-a-time rule works
+[ ] Subscription rules work
+[ ] Deposit rules work
+[ ] Automatic due dates work
+[ ] Automatic late fees work
+[ ] Payment tracking works
+[ ] Book returns work
+[ ] Lost book workflow works
+[ ] QR system works
+[ ] CSV import works
+[ ] CSV export works
+[ ] Notifications work
+[ ] Audit logs work
+[ ] Reports work
+[ ] PWA works
+[ ] Mobile UI works
+[ ] Error states work
+[ ] Loading states work
+[ ] Environment variables are documented
+[ ] No secrets are committed
+[ ] Vercel deployment configuration works
+[ ] Supabase migration files exist
+[ ] README explains complete setup
+
+IMPORTANT IMPLEMENTATION RULE
+
+Do not simply create UI screens.
+
+Every button and workflow must connect to the actual database/business logic.
+
+For example:
+
+"Approve Borrow"
+
+must actually:
+
+Validate admin authorization.
+Verify subscription.
+Verify member status.
+Verify book availability.
+Verify the member has no active book.
+Create/update the appropriate transaction.
+Update book status.
+Create notification.
+Send email if configured.
+Create audit log.
+Return a proper success/error response.
+
+The same principle applies to:
+
+Book Return
+Payment
+Subscription Renewal
+Member Suspension
+Book Lost
+CSV Import
+Email Configuration
+Admin Settings
+
+Build this as a real production business management system, not a visual prototype.
+
+At the end, provide:
+
+Complete file/folder structure
+Database migration files
+Required environment variables
+Supabase setup instructions
+Local development instructions
+Vercel deployment instructions
+Admin account setup instructions
+Yahoo App Password/SMTP configuration instructions
+Testing checklist
+Security checklist
+List of any remaining limitations
+List of any assumptions made
