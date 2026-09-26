@@ -2,20 +2,25 @@ import { Router, type IRouter } from "express";
 import { AdminLoginBody } from "@workspace/api-zod";
 import {
   adminSessionResponse,
-  authenticateAdminWithSupabase,
+  authenticateAdminWithPhone,
   clearAdminSessionCookie,
   createAdminSession,
   clearMemberSessionCookie,
   getAuthenticatedMember,
   getAuthenticatedAdmin,
+  loginMember,
   memberSessionResponse,
+  requestAdminOtp,
   requestMemberOtp,
   requestAdminPasswordReset,
   revokeAdminSession,
   revokeMemberSession,
   setAdminSessionCookie,
   setMemberSessionCookie,
+  setAdminPassword,
+  setMemberPassword,
   updateAdminPassword,
+  verifyOtp,
   verifyMemberOtp,
 } from "../auth";
 
@@ -24,7 +29,7 @@ const router: IRouter = Router();
 router.post("/auth/admin/login", async (request, response, next) => {
   try {
     const body = AdminLoginBody.parse(request.body);
-    const result = await authenticateAdminWithSupabase(body.email, body.password);
+    const result = await authenticateAdminWithPhone(body.phone, body.password);
     if (result.kind === "not_configured") {
       response.status(503).json({ error: "Administrator authentication is not configured." });
       return;
@@ -41,6 +46,68 @@ router.post("/auth/admin/login", async (request, response, next) => {
     const session = await createAdminSession(result.identity.userId, body.rememberSession ?? false);
     setAdminSessionCookie(response, session.token, session.expiresAt);
     response.json(adminSessionResponse(result.identity));
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/auth/admin/request-otp", async (request, response, next) => {
+  try {
+    const phone = typeof request.body?.phone === "string" ? request.body.phone : "";
+    const result = await requestAdminOtp(phone, request.ip);
+    if (result.kind === "not_configured") {
+      response.status(503).json({ error: "Administrator phone authentication is not configured." });
+      return;
+    }
+    if (result.kind === "not_available") {
+      response.status(403).json({ error: "This number is not configured for administrator setup." });
+      return;
+    }
+    if (result.kind === "cooldown") {
+      response.status(429).json({ error: "Please wait before requesting another code." });
+      return;
+    }
+    if (result.kind === "rate_limited") {
+      response.status(429).json({ error: "Too many requests. Try again later." });
+      return;
+    }
+    response.status(202).json({ message: "A verification code has been sent." });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/auth/admin/verify-otp", async (request, response, next) => {
+  try {
+    const phone = typeof request.body?.phone === "string" ? request.body.phone : "";
+    const otp = typeof request.body?.otp === "string" ? request.body.otp : "";
+    const result = await verifyOtp(phone, otp, "admin_setup");
+    if (result.kind !== "verified") {
+      response.status(401).json({ error: "The verification code is invalid or expired." });
+      return;
+    }
+    response.json({ verified: true, verificationToken: result.verificationToken });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/auth/admin/set-password", async (request, response, next) => {
+  try {
+    const phone = typeof request.body?.phone === "string" ? request.body.phone : "";
+    const password = typeof request.body?.password === "string" ? request.body.password : "";
+    const verificationToken =
+      typeof request.body?.verificationToken === "string" ? request.body.verificationToken : "";
+    const result = await setAdminPassword(phone, password, verificationToken);
+    if (result.kind === "invalid_password") {
+      response.status(400).json({ error: "Password must be at least 8 characters." });
+      return;
+    }
+    if (result.kind !== "updated") {
+      response.status(401).json({ error: "The OTP verification is invalid or expired." });
+      return;
+    }
+    response.json({ message: "Administrator password created. You can now sign in." });
   } catch (error) {
     next(error);
   }
@@ -123,10 +190,32 @@ router.get("/auth/member/session", async (request, response, next) => {
   }
 });
 
+router.post("/auth/member/login", async (request, response, next) => {
+  try {
+    const phone = typeof request.body?.phone === "string" ? request.body.phone : "";
+    const password = typeof request.body?.password === "string" ? request.body.password : "";
+    const result = await loginMember(phone, password);
+    if (result.kind === "not_configured") {
+      response.status(503).json({ error: "Member authentication is not configured." });
+      return;
+    }
+    if (result.kind !== "authenticated") {
+      response.status(401).json({ error: "Invalid mobile number or password." });
+      return;
+    }
+    setMemberSessionCookie(response, result.session.token, result.session.expiresAt);
+    response.json(memberSessionResponse(result.member));
+  } catch (error) {
+    next(error);
+  }
+});
+
 router.post("/auth/member/request-otp", async (request, response, next) => {
   try {
     const phone = typeof request.body?.phone === "string" ? request.body.phone : "";
-    const result = await requestMemberOtp(phone, request.ip);
+    const purpose =
+      request.body?.purpose === "member_reset" ? ("member_reset" as const) : ("member_signup" as const);
+    const result = await requestMemberOtp(phone, purpose, request.ip);
     if (result.kind === "not_configured") {
       response.status(503).json({ error: "Member phone authentication is not configured." });
       return;
@@ -149,18 +238,49 @@ router.post("/auth/member/verify-otp", async (request, response, next) => {
   try {
     const phone = typeof request.body?.phone === "string" ? request.body.phone : "";
     const otp = typeof request.body?.otp === "string" ? request.body.otp : "";
-    const result = await verifyMemberOtp(phone, otp);
-    if (result.kind !== "authenticated") {
+    const purpose =
+      request.body?.purpose === "member_reset" ? ("member_reset" as const) : ("member_signup" as const);
+    const result = await verifyMemberOtp(phone, otp, purpose);
+    if (result.kind !== "verified") {
       response.status(401).json({ error: "The verification code is invalid or expired." });
       return;
     }
-    setMemberSessionCookie(response, result.session.token, result.session.expiresAt);
-    response.json(memberSessionResponse(result.member ? {
-      userId: result.member.authUserId ?? "",
-      memberId: result.member.id,
-      phone: result.member.phone,
-      name: result.member.name,
-    } : null));
+    response.json({ verified: true, verificationToken: result.verificationToken });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.post("/auth/member/set-password", async (request, response, next) => {
+  try {
+    const phone = typeof request.body?.phone === "string" ? request.body.phone : "";
+    const password = typeof request.body?.password === "string" ? request.body.password : "";
+    const verificationToken =
+      typeof request.body?.verificationToken === "string" ? request.body.verificationToken : "";
+    const purpose =
+      request.body?.purpose === "member_reset" ? ("member_reset" as const) : ("member_signup" as const);
+    const result = await setMemberPassword(phone, password, verificationToken, purpose);
+    if (result.kind === "invalid_password") {
+      response.status(400).json({ error: "Password must be at least 8 characters." });
+      return;
+    }
+    if (result.kind === "already_registered") {
+      response.status(409).json({ error: "This number already has an account. Use Forgot password instead." });
+      return;
+    }
+    if (result.kind === "not_found") {
+      response.status(404).json({ error: "No member account was found for this number." });
+      return;
+    }
+    if (result.kind !== "updated") {
+      response.status(401).json({ error: "The OTP verification is invalid or expired." });
+      return;
+    }
+    if (purpose === "member_signup") {
+      response.json({ message: "Account created. You can now sign in." });
+      return;
+    }
+    response.json({ message: "Password updated. You can now sign in." });
   } catch (error) {
     next(error);
   }

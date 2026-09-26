@@ -6,8 +6,9 @@
  * OpenAPI spec version: 0.1.0
  */
 export interface AdminLoginInput {
-  email: string;
-  /** @minLength 1 */
+  /** Bangladeshi administrator mobile number */
+  phone: string;
+  /** @minLength 8 */
   password: string;
   rememberSession?: boolean;
 }

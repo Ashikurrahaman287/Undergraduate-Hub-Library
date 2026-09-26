@@ -130,11 +130,15 @@ export const memberSessionsTable = pgTable("member_sessions", {
 export const otpChallengesTable = pgTable("otp_challenges", {
   id: uuid("id").defaultRandom().primaryKey(),
   phone: text("phone").notNull(),
+  purpose: text("purpose").notNull().default("member_signup"),
   otpHash: text("otp_hash").notNull(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
   attempts: integer("attempts").notNull().default(0),
   requestedAt: timestamp("requested_at", { withTimezone: true }).notNull().defaultNow(),
   consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  verificationTokenHash: text("verification_token_hash"),
+  verificationExpiresAt: timestamp("verification_expires_at", { withTimezone: true }),
+  verificationConsumedAt: timestamp("verification_consumed_at", { withTimezone: true }),
   requestIp: text("request_ip"),
 });
 

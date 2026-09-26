@@ -20,12 +20,13 @@ export const HealthCheckResponse = zod.object({
 /**
  * @summary Sign in an administrator through Supabase Auth
  */
+export const adminLoginBodyPasswordMin = 8;
 
 export const adminLoginBodyRememberSessionDefault = false;
 
 export const AdminLoginBody = zod.object({
-  "email": zod.string().email(),
-  "password": zod.string().min(1),
+  "phone": zod.string().describe('Bangladeshi administrator mobile number'),
+  "password": zod.string().min(adminLoginBodyPasswordMin),
   "rememberSession": zod.boolean().default(adminLoginBodyRememberSessionDefault)
 })
 

@@ -144,49 +144,108 @@ function FullPageLoading() {
   return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><LoadingBlock rows={2} /></div>;
 }
 
+async function responseError(response: Response, fallback: string) {
+  try {
+    const payload = (await response.json()) as { error?: string };
+    return payload.error || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function AdminLoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
   const login = useAdminLogin();
-  const [email, setEmail] = useState('');
+  const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    login.mutate({ data: { email, password, rememberSession: true } }, {
+    login.mutate({ data: { phone, password, rememberSession: true } }, {
       onSuccess: onAuthenticated,
       onError: () => setMessage('Invalid administrator credentials.'),
     });
   };
-  return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p><h1 className="font-display text-3xl font-extrabold">Admin Portal</h1><p className="text-sm text-muted-foreground">Administrator access is verified on the server.</p><label className="block text-sm font-bold">Email<input type="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Password<input type="password" required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit" disabled={login.isPending}>{login.isPending ? 'Signing in…' : 'Login'}</Button><Link href="/admin/reset-password" className="block text-sm font-bold text-accent-foreground underline">Forgot password</Link>{message && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{message}</p>}</form></div>;
+  return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p><h1 className="font-display text-3xl font-extrabold">Admin Portal</h1><p className="text-sm text-muted-foreground">Sign in with the administrator mobile number and password.</p><label className="block text-sm font-bold">Mobile number<input type="tel" autoComplete="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="016XXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Password<input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit" disabled={login.isPending}>{login.isPending ? 'Signing in…' : 'Login'}</Button><Link href="/admin/setup" className="block text-sm font-bold text-accent-foreground underline">First-time administrator setup</Link>{message && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{message}</p>}</form></div>;
 }
 
-function AdminResetPasswordPage() {
+function AdminSetupPage() {
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [verificationToken, setVerificationToken] = useState('');
+  const [step, setStep] = useState<'phone' | 'otp' | 'password'>('phone');
   const [message, setMessage] = useState('');
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const accessToken = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('access_token') ?? '';
-    const response = await fetch('/api/auth/admin/reset-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accessToken, password }) });
-    setMessage(response.ok ? 'Password updated. You can now sign in.' : 'The recovery link is invalid or expired.');
+  const requestOtp = async () => {
+    const response = await fetch('/api/auth/admin/request-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone }) });
+    if (!response.ok) { setMessage(await responseError(response, 'Unable to send the verification code.')); return; }
+    setStep('otp');
+    setMessage('A verification code was sent to the administrator number.');
   };
-  return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl"><h1 className="font-display text-3xl font-extrabold">Set a new password</h1><label className="block text-sm font-bold">New password<input type="password" minLength={12} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit">Update password</Button>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/admin/login" className="block text-sm font-bold text-accent-foreground underline">Return to admin login</Link></form></div>;
+  const verify = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const response = await fetch('/api/auth/admin/verify-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, otp }) });
+    if (!response.ok) { setMessage(await responseError(response, 'The verification code is invalid or expired.')); return; }
+    const payload = (await response.json()) as { verificationToken: string };
+    setVerificationToken(payload.verificationToken);
+    setStep('password');
+    setMessage('');
+  };
+  const setAdminPassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (password !== confirmPassword) { setMessage('Passwords do not match.'); return; }
+    const response = await fetch('/api/auth/admin/set-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, password, verificationToken }) });
+    setMessage(response.ok ? 'Password created. You can now sign in.' : await responseError(response, 'Unable to create the administrator password.'));
+    if (response.ok) setStep('phone');
+  };
+  return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6"><form onSubmit={step === 'phone' ? (event) => { event.preventDefault(); void requestOtp(); } : step === 'otp' ? verify : setAdminPassword} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p><h1 className="font-display text-3xl font-extrabold">Administrator setup</h1><p className="text-sm text-muted-foreground">{step === 'phone' ? 'Verify the configured administrator number to create the first password.' : step === 'otp' ? 'Enter the six-digit code sent to the administrator number.' : 'Choose a password for future administrator logins.'}</p>{step === 'phone' && <label className="block text-sm font-bold">Mobile number<input type="tel" autoComplete="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="016XXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}{step === 'otp' && <label className="block text-sm font-bold">Verification code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}{step === 'password' && <><label className="block text-sm font-bold">New password<input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Confirm password<input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label></>}<Button type="submit">{step === 'phone' ? 'Send OTP' : step === 'otp' ? 'Verify OTP' : 'Create password'}</Button>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/admin/login" className="block text-sm font-bold text-accent-foreground underline">Return to admin login</Link></form></div>;
 }
 
 function MemberLoginPage({ onAuthenticated }: { onAuthenticated?: () => void }) {
   const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
-  const [sent, setSent] = useState(false);
+  const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const response = await fetch('/api/auth/member/login', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ phone, password }) });
+    if (response.ok) onAuthenticated?.(); else setMessage(await responseError(response, 'Invalid mobile number or password.'));
+  };
+  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl"><h1 className="font-display text-3xl font-extrabold">Member sign in</h1><p className="text-sm text-muted-foreground">Use your mobile number and password to sign in.</p><label className="block text-sm font-bold">Mobile number<input type="tel" autoComplete="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="017XXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Password<input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit">Login</Button><div className="flex flex-wrap justify-between gap-3 text-sm font-bold"><Link href="/create-account" className="text-accent-foreground underline">Create account</Link><Link href="/forgot-password" className="text-accent-foreground underline">Forgot password?</Link></div>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/" className="block text-sm font-bold text-accent-foreground underline">Continue browsing books</Link></form></div>;
+}
+
+function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [verificationToken, setVerificationToken] = useState('');
+  const [step, setStep] = useState<'phone' | 'otp' | 'password'>('phone');
+  const [message, setMessage] = useState('');
+  const purpose = mode === 'signup' ? 'member_signup' : 'member_reset';
   const requestOtp = async () => {
-    const response = await fetch('/api/auth/member/request-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone }) });
-    setMessage(response.ok ? 'A verification code was sent if this number is eligible.' : 'Enter a valid Bangladeshi mobile number.');
-    if (response.ok) setSent(true);
+    const response = await fetch('/api/auth/member/request-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, purpose }) });
+    if (!response.ok) { setMessage(await responseError(response, 'Unable to send the verification code.')); return; }
+    setStep('otp');
+    setMessage('A verification code was sent to your mobile number.');
   };
   const verify = async (event: React.FormEvent) => {
     event.preventDefault();
-    const response = await fetch('/api/auth/member/verify-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, otp }) });
-    if (response.ok) onAuthenticated?.(); else setMessage('The verification code is invalid or expired.');
+    const response = await fetch('/api/auth/member/verify-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, otp, purpose }) });
+    if (!response.ok) { setMessage(await responseError(response, 'The verification code is invalid or expired.')); return; }
+    const payload = (await response.json()) as { verificationToken: string };
+    setVerificationToken(payload.verificationToken);
+    setStep('password');
+    setMessage('');
   };
-  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><form onSubmit={verify} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl"><h1 className="font-display text-3xl font-extrabold">Member sign in</h1><p className="text-sm text-muted-foreground">Use a Bangladeshi mobile number to receive a one-time code.</p><label className="block text-sm font-bold">Mobile number<input required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="017XXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>{sent && <label className="block text-sm font-bold">Verification code<input inputMode="numeric" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}<div className="flex gap-2"><Button type="button" onClick={requestOtp} disabled={!phone}>Send code</Button>{sent && <Button type="submit" disabled={otp.length !== 6}>Verify</Button>}</div>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/" className="block text-sm font-bold text-accent-foreground underline">Continue browsing books</Link></form></div>;
+  const setPasswordForMember = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (password !== confirmPassword) { setMessage('Passwords do not match.'); return; }
+    const response = await fetch('/api/auth/member/set-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone, password, verificationToken, purpose }) });
+    setMessage(response.ok ? mode === 'signup' ? 'Account created. You can now sign in.' : 'Password updated. You can now sign in.' : await responseError(response, 'Unable to save the password.'));
+    if (response.ok) setStep('phone');
+  };
+  const title = mode === 'signup' ? 'Create member account' : 'Forgot password';
+  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><form onSubmit={step === 'phone' ? (event) => { event.preventDefault(); void requestOtp(); } : step === 'otp' ? verify : setPasswordForMember} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p><h1 className="font-display text-3xl font-extrabold">{title}</h1><p className="text-sm text-muted-foreground">{step === 'phone' ? 'Start with your mobile number. We will send a one-time verification code.' : step === 'otp' ? 'Enter the six-digit code sent to your mobile number.' : 'Choose a password for future logins.'}</p>{step === 'phone' && <label className="block text-sm font-bold">Mobile number<input type="tel" autoComplete="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="017XXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}{step === 'otp' && <label className="block text-sm font-bold">Verification code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}{step === 'password' && <><label className="block text-sm font-bold">New password<input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Confirm password<input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label></>}<Button type="submit">{step === 'phone' ? 'Send OTP' : step === 'otp' ? 'Verify OTP' : mode === 'signup' ? 'Create account' : 'Save new password'}</Button>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/login" className="block text-sm font-bold text-accent-foreground underline">Return to member login</Link></form></div>;
 }
 
 function Router() {
@@ -203,7 +262,10 @@ function Router() {
   };
 
   if (location === '/admin/login') return <AdminLoginPage onAuthenticated={() => { void adminSession.refetch(); setLocation('/admin'); }} />;
-  if (location === '/admin/reset-password') return <AdminResetPasswordPage />;
+  if (location === '/admin/setup') return <AdminSetupPage />;
+  if (location === '/admin/reset-password') return <AdminSetupPage />;
+  if (location === '/create-account') return <MemberPasswordFlowPage mode="signup" />;
+  if (location === '/forgot-password') return <MemberPasswordFlowPage mode="reset" />;
   if (isAdminRoute) {
     if (adminSession.isLoading) return <FullPageLoading />;
     if (!adminSession.data?.authenticated) return <Redirect to="/admin/login" />;
@@ -232,7 +294,7 @@ function Router() {
     <Route path="/my-books" component={MyBooksPage} />
     <Route path="/requests" component={RequestsPage} />
     <Route path="/account" component={AccountPage} />
-    <Route path="/login"><MemberLoginPage /></Route>
+     <Route path="/login"><MemberLoginPage onAuthenticated={() => { void memberSession.refresh(); setLocation('/dashboard'); }} /></Route>
     <Route component={NotFound} />
   </Switch></Shell>;
 }

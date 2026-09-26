@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomInt } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
 import { and, count, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import {
@@ -20,6 +20,8 @@ const OTP_TTL_SECONDS = 5 * 60;
 const OTP_RESEND_SECONDS = 60;
 const OTP_MAX_ATTEMPTS = 5;
 const OTP_HOURLY_LIMIT = 5;
+const VERIFICATION_TOKEN_SECONDS = 10 * 60;
+export type OtpPurpose = "member_signup" | "member_reset" | "admin_setup";
 
 export type AdminRole = "staff" | "admin" | "super_admin";
 export type AdminPermission =
@@ -129,10 +131,26 @@ function hashOtp(otp: string) {
   return createHash("sha256").update(`${secret}:${otp}`).digest("hex");
 }
 
-function phoneSessionPassword(phone: string) {
+function hashVerificationToken(token: string) {
   const secret = process.env.SESSION_SECRET;
   if (!secret) throw new Error("SESSION_SECRET is not configured.");
-  return createHash("sha256").update(`${secret}:phone:${phone}`).digest("hex");
+  return createHash("sha256").update(`${secret}:verification:${token}`).digest("hex");
+}
+
+function createVerificationToken() {
+  return randomBytes(32).toString("base64url");
+}
+
+function configuredAdminPhone() {
+  const value = process.env.ADMIN_PHONE_NUMBER;
+  if (!value) throw new Error("ADMIN_PHONE_NUMBER is not configured.");
+  return normalizeBangladeshiPhone(value);
+}
+
+function safeTokenMatch(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 function getCookieValue(request: Request, name: string) {
@@ -466,10 +484,9 @@ export async function updateAdminPassword(accessToken: string, password: string)
     : ({ kind: "invalid_or_expired_token" as const });
 }
 
-async function ensureSupabasePhoneUser(phone: string) {
+async function ensureSupabasePhoneUser(phone: string, password: string) {
   const config = getSupabaseConfig();
   if (!config) throw new Error("Supabase authentication is not configured.");
-  const password = phoneSessionPassword(phone);
   const createResponse = await fetch(`${config.url}/auth/v1/admin/users`, {
     method: "POST",
     headers: {
@@ -514,10 +531,9 @@ async function ensureSupabasePhoneUser(phone: string) {
   return { userId: user.id, password };
 }
 
-async function establishSupabasePhoneSession(phone: string) {
+async function authenticateSupabasePhone(phone: string, password: string) {
   const config = getSupabaseConfig();
-  if (!config) throw new Error("Supabase authentication is not configured.");
-  const { userId, password } = await ensureSupabasePhoneUser(phone);
+  if (!config) return { kind: "not_configured" as const };
   const response = await fetch(`${config.url}/auth/v1/token?grant_type=password`, {
     method: "POST",
     headers: {
@@ -526,23 +542,51 @@ async function establishSupabasePhoneSession(phone: string) {
     },
     body: JSON.stringify({ phone, password }),
   });
-  if (!response.ok) throw new Error("Unable to establish the Supabase member session.");
-  return userId;
+  if (!response.ok) return { kind: "invalid_credentials" as const };
+  const payload = (await response.json()) as { user?: { id?: string } };
+  return payload.user?.id
+    ? ({ kind: "authenticated" as const, userId: payload.user.id })
+    : ({ kind: "invalid_credentials" as const });
 }
 
-export async function requestMemberOtp(phone: string, requestIp?: string | null) {
-  normalizeBangladeshiPhone(phone);
-  if (!process.env.SESSION_SECRET || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+export async function authenticateMemberWithPassword(phone: string, password: string) {
+  const normalizedPhone = normalizeBangladeshiPhone(phone);
+  const result = await authenticateSupabasePhone(normalizedPhone, password);
+  if (result.kind !== "authenticated") return result;
+  const member = await findMemberByUserId(result.userId);
+  if (!member) return { kind: "not_authorized" as const };
+  return { kind: "authenticated" as const, member };
+}
+
+export async function authenticateAdminWithPhone(phone: string, password: string) {
+  const normalizedPhone = normalizeBangladeshiPhone(phone);
+  const result = await authenticateSupabasePhone(normalizedPhone, password);
+  if (result.kind !== "authenticated") return result;
+  const identity = await findAdminByUserId(result.userId);
+  if (!identity) return { kind: "not_authorized" as const };
+  return { kind: "authenticated" as const, identity };
+}
+
+async function requestOtpChallenge(
+  phone: string,
+  purpose: OtpPurpose,
+  requestIp?: string | null,
+) {
+  const normalizedPhone = normalizeBangladeshiPhone(phone);
+  if (!process.env.SESSION_SECRET || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.SMS_API_KEY) {
     return { kind: "not_configured" as const };
   }
+  if (purpose === "admin_setup" && normalizedPhone !== configuredAdminPhone()) {
+    return { kind: "not_available" as const };
+  }
   const now = new Date();
-  const normalizedPhone = normalizeBangladeshiPhone(phone);
   const [recent] = await db
     .select({ requestedAt: otpChallengesTable.requestedAt })
     .from(otpChallengesTable)
     .where(
       and(
         eq(otpChallengesTable.phone, normalizedPhone),
+        eq(otpChallengesTable.purpose, purpose),
         gt(otpChallengesTable.requestedAt, new Date(now.getTime() - OTP_RESEND_SECONDS * 1000)),
         isNull(otpChallengesTable.consumedAt),
       ),
@@ -557,6 +601,7 @@ export async function requestMemberOtp(phone: string, requestIp?: string | null)
     .where(
       and(
         eq(otpChallengesTable.phone, normalizedPhone),
+        eq(otpChallengesTable.purpose, purpose),
         gt(otpChallengesTable.requestedAt, new Date(now.getTime() - 60 * 60 * 1000)),
       ),
     );
@@ -565,11 +610,18 @@ export async function requestMemberOtp(phone: string, requestIp?: string | null)
   await db
     .update(otpChallengesTable)
     .set({ consumedAt: now })
-    .where(and(eq(otpChallengesTable.phone, normalizedPhone), isNull(otpChallengesTable.consumedAt)));
+    .where(
+      and(
+        eq(otpChallengesTable.phone, normalizedPhone),
+        eq(otpChallengesTable.purpose, purpose),
+        isNull(otpChallengesTable.consumedAt),
+      ),
+    );
 
   const otp = String(randomInt(100000, 1000000));
   await db.insert(otpChallengesTable).values({
     phone: normalizedPhone,
+    purpose,
     otpHash: hashOtp(otp),
     expiresAt: new Date(now.getTime() + OTP_TTL_SECONDS * 1000),
     requestIp: requestIp ?? null,
@@ -580,14 +632,36 @@ export async function requestMemberOtp(phone: string, requestIp?: string | null)
     await db
       .update(otpChallengesTable)
       .set({ consumedAt: new Date() })
-      .where(and(eq(otpChallengesTable.phone, normalizedPhone), eq(otpChallengesTable.otpHash, hashOtp(otp))));
+      .where(
+        and(
+          eq(otpChallengesTable.phone, normalizedPhone),
+          eq(otpChallengesTable.purpose, purpose),
+          eq(otpChallengesTable.otpHash, hashOtp(otp)),
+        ),
+      );
     throw error;
   }
   return { kind: "sent" as const };
 }
 
-export async function verifyMemberOtp(phone: string, otp: string) {
+export async function requestMemberOtp(
+  phone: string,
+  purpose: OtpPurpose = "member_signup",
+  requestIp?: string | null,
+) {
+  if (purpose === "admin_setup") return { kind: "not_available" as const };
+  return requestOtpChallenge(phone, purpose, requestIp);
+}
+
+export async function requestAdminOtp(phone: string, requestIp?: string | null) {
+  return requestOtpChallenge(phone, "admin_setup", requestIp);
+}
+
+export async function verifyOtp(phone: string, otp: string, purpose: OtpPurpose) {
   const normalizedPhone = normalizeBangladeshiPhone(phone);
+  if (purpose === "admin_setup" && normalizedPhone !== configuredAdminPhone()) {
+    return { kind: "invalid" as const };
+  }
   if (!/^\d{6}$/.test(otp)) return { kind: "invalid" as const };
   const [challenge] = await db
     .select()
@@ -595,6 +669,7 @@ export async function verifyMemberOtp(phone: string, otp: string) {
     .where(
       and(
         eq(otpChallengesTable.phone, normalizedPhone),
+        eq(otpChallengesTable.purpose, purpose),
         isNull(otpChallengesTable.consumedAt),
         gt(otpChallengesTable.expiresAt, new Date()),
       ),
@@ -610,28 +685,134 @@ export async function verifyMemberOtp(phone: string, otp: string) {
     .where(eq(otpChallengesTable.id, challenge.id));
   if (!matches) return { kind: "invalid" as const };
 
-  const userId = await establishSupabasePhoneSession(normalizedPhone);
+  const verificationToken = createVerificationToken();
+  await db
+    .update(otpChallengesTable)
+    .set({
+      verificationTokenHash: hashVerificationToken(verificationToken),
+      verificationExpiresAt: new Date(Date.now() + VERIFICATION_TOKEN_SECONDS * 1000),
+    })
+    .where(eq(otpChallengesTable.id, challenge.id));
+  return { kind: "verified" as const, verificationToken, phone: normalizedPhone, purpose };
+}
+
+async function consumeVerification(phone: string, purpose: OtpPurpose, verificationToken: string) {
+  const normalizedPhone = normalizeBangladeshiPhone(phone);
+  const [challenge] = await db
+    .select()
+    .from(otpChallengesTable)
+    .where(
+      and(
+        eq(otpChallengesTable.phone, normalizedPhone),
+        eq(otpChallengesTable.purpose, purpose),
+        eq(otpChallengesTable.verificationTokenHash, hashVerificationToken(verificationToken)),
+        gt(otpChallengesTable.verificationExpiresAt, new Date()),
+        isNull(otpChallengesTable.verificationConsumedAt),
+      ),
+    )
+    .orderBy(desc(otpChallengesTable.requestedAt))
+    .limit(1);
+  if (!challenge || !challenge.verificationTokenHash || !safeTokenMatch(challenge.verificationTokenHash, hashVerificationToken(verificationToken))) {
+    return null;
+  }
+  await db
+    .update(otpChallengesTable)
+    .set({ verificationConsumedAt: new Date() })
+    .where(eq(otpChallengesTable.id, challenge.id));
+  return normalizedPhone;
+}
+
+async function upsertMemberProfile(userId: string, phone: string) {
   let [member] = await db
     .select()
     .from(membersTable)
     .where(eq(membersTable.authUserId, userId))
     .limit(1);
+  if (!member) [member] = await db.insert(membersTable).values({
+    authUserId: userId,
+    name: "New member",
+    phone,
+    university: "Other",
+  }).onConflictDoNothing({ target: membersTable.phone }).returning();
   if (!member) {
-    [member] = await db
-      .insert(membersTable)
-      .values({
-        authUserId: userId,
-        name: "New member",
-        phone: normalizedPhone,
-        university: "Other",
-      })
-      .onConflictDoNothing({ target: membersTable.phone })
-      .returning();
-  }
-  if (!member) {
-    [member] = await db.select().from(membersTable).where(eq(membersTable.phone, normalizedPhone)).limit(1);
+    [member] = await db.select().from(membersTable).where(eq(membersTable.phone, phone)).limit(1);
   }
   if (!member) throw new Error("Unable to create the member profile.");
-  const session = await createMemberSession(userId, member.id);
-  return { kind: "authenticated" as const, member, session };
+  if (!member.authUserId) {
+    [member] = await db
+      .update(membersTable)
+      .set({ authUserId: userId, updatedAt: new Date() })
+      .where(eq(membersTable.id, member.id))
+      .returning();
+  }
+  return member;
+}
+
+export async function setMemberPassword(
+  phone: string,
+  password: string,
+  verificationToken: string,
+  purpose: "member_signup" | "member_reset",
+) {
+  if (password.length < 8) return { kind: "invalid_password" as const };
+  const normalizedPhone = await consumeVerification(phone, purpose, verificationToken);
+  if (!normalizedPhone) return { kind: "invalid_verification" as const };
+  const existing = await db
+    .select({ id: membersTable.id })
+    .from(membersTable)
+    .where(eq(membersTable.phone, normalizedPhone))
+    .limit(1);
+  if (purpose === "member_signup" && existing.length > 0) return { kind: "already_registered" as const };
+  if (purpose === "member_reset" && existing.length === 0) return { kind: "not_found" as const };
+
+  const { userId } = await ensureSupabasePhoneUser(normalizedPhone, password);
+  const member = await upsertMemberProfile(userId, normalizedPhone);
+  return { kind: "updated" as const, member };
+}
+
+export async function setAdminPassword(phone: string, password: string, verificationToken: string) {
+  if (password.length < 8) return { kind: "invalid_password" as const };
+  const normalizedPhone = await consumeVerification(phone, "admin_setup", verificationToken);
+  if (!normalizedPhone || normalizedPhone !== configuredAdminPhone()) {
+    return { kind: "invalid_verification" as const };
+  }
+  const { userId } = await ensureSupabasePhoneUser(normalizedPhone, password);
+  let [member] = await db
+    .select()
+    .from(membersTable)
+    .where(eq(membersTable.phone, normalizedPhone))
+    .limit(1);
+  if (!member) {
+    [member] = await db.insert(membersTable).values({
+      authUserId: userId,
+      name: "Undergraduate Hub administrator",
+      phone: normalizedPhone,
+      university: "Undergraduate Hub",
+      role: "admin",
+    }).returning();
+  } else {
+    [member] = await db.update(membersTable).set({
+      authUserId: userId,
+      role: "admin",
+      status: "active",
+      updatedAt: new Date(),
+    }).where(eq(membersTable.id, member.id)).returning();
+  }
+  await db.insert(userRolesTable).values({ userId, role: "admin", createdBy: userId }).onConflictDoNothing();
+  return { kind: "updated" as const, member };
+}
+
+export async function verifyMemberOtp(phone: string, otp: string, purpose: "member_signup" | "member_reset" = "member_signup") {
+  return verifyOtp(phone, otp, purpose);
+}
+
+export async function loginMember(phone: string, password: string) {
+  const result = await authenticateMemberWithPassword(phone, password);
+  if (result.kind !== "authenticated") return result;
+  const session = await createMemberSession(result.member.userId, result.member.memberId);
+  return { kind: "authenticated" as const, member: result.member, session };
+}
+
+export async function loginAdmin(phone: string, password: string) {
+  return authenticateAdminWithPhone(phone, password);
 }

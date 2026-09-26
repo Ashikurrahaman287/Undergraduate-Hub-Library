@@ -394,10 +394,10 @@ components:
   schemas:
     AdminLoginInput:
       type: object
-      required: [email, password]
+      required: [phone, password]
       properties:
-        email: { type: string, format: email }
-        password: { type: string, minLength: 1 }
+        phone: { type: string, description: Bangladeshi administrator mobile number }
+        password: { type: string, minLength: 8 }
         rememberSession: { type: boolean, default: false }
     AdminAuthSession:
       type: object
