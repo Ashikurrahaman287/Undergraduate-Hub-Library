@@ -430,7 +430,11 @@ router.get("/books", async (req, res) => {
   const filters = [];
   if (params.search) {
     filters.push(
-      or(ilike(booksTable.title, `%${params.search}%`), ilike(booksTable.author, `%${params.search}%`)),
+      or(
+        ilike(booksTable.title, `%${params.search}%`),
+        ilike(booksTable.author, `%${params.search}%`),
+        ilike(booksTable.isbn, `%${params.search}%`),
+      ),
     );
   }
   if (params.category) filters.push(eq(booksTable.category, params.category));
@@ -438,15 +442,24 @@ router.get("/books", async (req, res) => {
   if (params.status) filters.push(eq(booksTable.status, params.status as "available" | "rented" | "lost"));
   const orderBy =
     params.sort === "recent"
-      ? desc(booksTable.createdAt)
+      ? [desc(booksTable.createdAt)]
       : params.sort === "popular"
-        ? desc(booksTable.price)
-        : asc(booksTable.title);
+        ? [
+            desc(
+              sql<number>`(
+                select count(*)
+                from ${transactionsTable}
+                where ${transactionsTable.bookId} = ${booksTable.id}
+              )`,
+            ),
+            asc(booksTable.title),
+          ]
+        : [asc(booksTable.title)];
   const books = await db
     .select()
     .from(booksTable)
     .where(filters.length ? and(...filters) : undefined)
-    .orderBy(orderBy)
+    .orderBy(...orderBy)
     .limit(params.pageSize)
     .offset((params.page - 1) * params.pageSize);
   res.json(books.map(mapBook));

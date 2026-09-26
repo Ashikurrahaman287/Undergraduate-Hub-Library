@@ -16,6 +16,7 @@ import {
   Download,
   LayoutDashboard,
   LibraryBig,
+  Heart,
   Menu,
   MoreHorizontal,
   PackageCheck,
@@ -64,6 +65,7 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
+import { WishlistPage } from '@/pages/wishlist-page';
 import { Link, Route, Switch, Router as WouterRouter, useLocation, useParams } from 'wouter';
 
 const queryClient = new QueryClient();
@@ -120,6 +122,7 @@ function Router() {
         <Route path="/dashboard" component={MemberDashboard} />
         <Route path="/books" component={BooksPage} />
         <Route path="/books/:id" component={BookDetailPage} />
+        <Route path="/wishlist" component={WishlistPage} />
         <Route path="/my-books" component={MyBooksPage} />
         <Route path="/requests" component={RequestsPage} />
         <Route path="/account" component={AccountPage} />
@@ -143,7 +146,7 @@ function Shell({ children, role, onRoleChange }: { children: ReactNode; role: Ro
     month: 'long',
     year: 'numeric',
   }).format(new Date());
-  const memberNav = [{ href: '/', label: 'Home', bn: 'হোম', icon: LayoutDashboard }, { href: '/books', label: 'Find a book', bn: 'বই খুঁজুন', icon: BookOpen }, { href: '/my-books', label: 'My books', bn: 'আমার বই', icon: LibraryBig }, { href: '/requests', label: 'My requests', bn: 'আমার অনুরোধ', icon: Clock3 }, { href: '/account', label: 'Account', bn: 'অ্যাকাউন্ট', icon: UserRound }];
+  const memberNav = [{ href: '/', label: 'Home', bn: 'হোম', icon: LayoutDashboard }, { href: '/books', label: 'Find a book', bn: 'বই খুঁজুন', icon: BookOpen }, { href: '/my-books', label: 'My books', bn: 'আমার বই', icon: LibraryBig }, { href: '/wishlist', label: 'Wishlist', bn: 'পছন্দের বই', icon: Heart }, { href: '/requests', label: 'My requests', bn: 'আমার অনুরোধ', icon: Clock3 }, { href: '/account', label: 'Account', bn: 'অ্যাকাউন্ট', icon: UserRound }];
   const staffNav = [{ href: '/admin', label: 'Staff overview', icon: LayoutDashboard }, { href: '/admin/books', label: 'Inventory', icon: Boxes }, { href: '/admin/requests', label: 'Requests', icon: PackageCheck }, { href: '/admin/members', label: 'Members', icon: Users }, { href: '/admin/payments', label: 'Payments', icon: WalletCards }, { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 }];
   const nav = role === 'member' ? memberNav : staffNav;
   const [location] = useLocation();
@@ -179,8 +182,9 @@ function Shell({ children, role, onRoleChange }: { children: ReactNode; role: Ro
           <div className="flex items-center gap-3"><button onClick={() => setMobileNav(true)} className="rounded-lg p-2 hover:bg-muted lg:hidden" data-testid="button-open-navigation"><Menu size={20} /></button><div className="hidden text-sm text-muted-foreground sm:block">{role === 'staff' ? 'Staff desk / ' : ''}<span className="font-semibold text-foreground">{role === 'staff' ? 'Today at the library' : today}</span></div></div>
            <div className="flex items-center gap-2 sm:gap-4"><NotificationBell /><div className="hidden h-7 w-px bg-border sm:block" /><button className="flex items-center gap-2 rounded-xl py-1.5 pl-1.5 pr-2 transition-colors hover:bg-muted" onClick={() => onRoleChange(role === 'member' ? 'staff' : 'member')} data-testid="button-account-switch"><span className="grid size-8 place-items-center rounded-lg bg-secondary text-xs font-extrabold text-primary">NR</span><span className="hidden text-left sm:block"><span className="block text-xs font-bold">{role === 'member' ? 'Nafisa Rahman' : 'Library staff'}</span><span className="block text-[10px] text-muted-foreground">{role === 'member' ? 'Member · Standard' : 'Operations'}</span></span><ChevronDown size={14} className="text-muted-foreground" /></button></div>
         </header>
-        <main className="mx-auto max-w-[1440px] px-5 py-7 sm:px-8 lg:px-10">{children}</main>
+        <main className="mx-auto max-w-[1440px] px-5 py-7 pb-24 sm:px-8 lg:px-10 lg:pb-7">{children}</main>
       </div>
+      {role === 'member' && <nav aria-label="Member navigation" className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-card/95 px-1 pb-[max(0.4rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_-8px_22px_hsl(187_35%_16%/.07)] backdrop-blur lg:hidden">{[{ href: '/', label: 'Home', icon: LayoutDashboard }, { href: '/books', label: 'Search', icon: Search }, { href: '/my-books', label: 'My books', icon: LibraryBig }, { href: '/wishlist', label: 'Wishlist', icon: Heart }, { href: '/account', label: 'Profile', icon: UserRound }].map((item) => { const Icon = item.icon; const active = location === item.href || (item.href !== '/' && location.startsWith(item.href)); return <Link key={item.href} href={item.href} className={`flex min-h-12 flex-col items-center justify-center gap-1 rounded-lg text-[10px] font-bold transition-colors ${active ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}`} aria-current={active ? 'page' : undefined}><Icon size={18} /><span>{item.label}</span></Link>; })}</nav>}
     </div>
   );
 }
