@@ -34,6 +34,10 @@ router.post("/auth/admin/login", async (request, response, next) => {
       response.status(503).json({ error: "Administrator authentication is not configured." });
       return;
     }
+    if (result.kind === "phone_auth_disabled") {
+      response.status(503).json({ error: "Phone authentication is disabled in the connected Supabase project." });
+      return;
+    }
     if (result.kind === "invalid_credentials") {
       response.status(401).json({ error: "Invalid administrator credentials." });
       return;
@@ -197,6 +201,10 @@ router.post("/auth/member/login", async (request, response, next) => {
     const result = await loginMember(phone, password);
     if (result.kind === "not_configured") {
       response.status(503).json({ error: "Member authentication is not configured." });
+      return;
+    }
+    if (result.kind === "phone_auth_disabled") {
+      response.status(503).json({ error: "Phone authentication is disabled in the connected Supabase project." });
       return;
     }
     if (result.kind !== "authenticated") {

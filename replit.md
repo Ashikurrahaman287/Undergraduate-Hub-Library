@@ -13,7 +13,7 @@ Book exchange and physical library management for students in Dhaka, with member
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
 - `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
 - Required development env: `DATABASE_URL` — Postgres connection string
-- Required production auth env: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `SESSION_SECRET`
+- Required production auth env: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, and `SESSION_SECRET`. Replit development may use the managed Supabase connector; Vercel production must use the direct Supabase variables.
 - Required production member OTP env: `SMS_API_BASE_URL`, `SMS_API_KEY`, and `SMS_API_LABEL`
 - One-time admin env: `ADMIN_INITIAL_EMAIL` and `ADMIN_INITIAL_PASSWORD`
 

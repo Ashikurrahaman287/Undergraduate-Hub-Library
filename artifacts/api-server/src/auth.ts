@@ -1,5 +1,6 @@
 import { createHash, createHmac, randomBytes, randomInt, timingSafeEqual } from "node:crypto";
 import type { NextFunction, Request, Response } from "express";
+import { ReplitConnectors } from "@replit/connectors-sdk";
 import { and, count, desc, eq, gt, isNull, lt } from "drizzle-orm";
 import {
   adminSessionsTable,
@@ -410,21 +411,14 @@ export function memberSessionResponse(identity: MemberIdentity | null) {
 }
 
 export async function authenticateAdminWithSupabase(email: string, password: string) {
-  const supabaseUrl = process.env.SUPABASE_URL?.replace(/\/$/, "");
-  const supabaseAnonKey =
-    process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) {
+  if (!hasSupabaseAuthAccess()) {
     return { kind: "not_configured" as const };
   }
 
-  const response = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
+  const response = await supabaseRequest("/auth/v1/token?grant_type=password", {
     method: "POST",
-    headers: {
-      apikey: supabaseAnonKey,
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ email, password }),
-  });
+  }, "anon");
   if (!response.ok) return { kind: "invalid_credentials" as const };
 
   const payload = (await response.json()) as { user?: { id?: string; email?: string } };
@@ -440,26 +434,55 @@ export function getSupabaseConfig() {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
   const anonKey = process.env.SUPABASE_ANON_KEY ?? process.env.SUPABASE_PUBLISHABLE_KEY;
   const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !anonKey || !serviceRoleKey) return null;
+  if (!url || !anonKey) return null;
   return { url, anonKey, serviceRoleKey };
 }
 
-export async function requestAdminPasswordReset(email: string) {
+function hasSupabaseAuthAccess() {
+  return Boolean(getSupabaseConfig() || process.env.REPLIT_CONNECTORS_HOSTNAME);
+}
+
+function hasSupabaseServiceAccess() {
+  return Boolean(getSupabaseConfig()?.serviceRoleKey || process.env.REPLIT_CONNECTORS_HOSTNAME);
+}
+
+type SupabaseRequestInit = {
+  method?: string;
+  headers?: Record<string, string>;
+  body?: string;
+};
+
+async function supabaseRequest(
+  path: string,
+  init: SupabaseRequestInit = {},
+  access: "anon" | "service",
+) {
   const config = getSupabaseConfig();
-  if (!config) return { kind: "not_configured" as const };
+  if (config) {
+    const apiKey = access === "service" ? config.serviceRoleKey : config.anonKey;
+    if (!apiKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
+    const headers = new Headers(init.headers);
+    headers.set("apikey", apiKey);
+    if (access === "service") headers.set("Authorization", `Bearer ${apiKey}`);
+    return fetch(`${config.url}${path}`, { ...init, headers });
+  }
+  if (!process.env.REPLIT_CONNECTORS_HOSTNAME) {
+    throw new Error("Supabase authentication is not configured.");
+  }
+  return new ReplitConnectors().proxy("supabase", path, init);
+}
+
+export async function requestAdminPasswordReset(email: string) {
+  if (!hasSupabaseAuthAccess()) return { kind: "not_configured" as const };
 
   const redirectTo = process.env.ADMIN_PASSWORD_RESET_REDIRECT_URL;
-  const response = await fetch(`${config.url}/auth/v1/recover`, {
+  const response = await supabaseRequest("/auth/v1/recover", {
     method: "POST",
-    headers: {
-      apikey: config.anonKey,
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({
       email: email.trim().toLowerCase(),
       ...(redirectTo ? { redirect_to: redirectTo } : {}),
     }),
-  });
+  }, "anon");
   if (!response.ok && response.status !== 400) {
     throw new Error("Unable to start password recovery.");
   }
@@ -467,82 +490,65 @@ export async function requestAdminPasswordReset(email: string) {
 }
 
 export async function updateAdminPassword(accessToken: string, password: string) {
-  const config = getSupabaseConfig();
-  if (!config) return { kind: "not_configured" as const };
+  if (!hasSupabaseAuthAccess()) return { kind: "not_configured" as const };
 
-  const response = await fetch(`${config.url}/auth/v1/user`, {
+  const response = await supabaseRequest("/auth/v1/user", {
     method: "PUT",
     headers: {
-      apikey: config.anonKey,
       Authorization: `Bearer ${accessToken}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ password }),
-  });
+  }, "anon");
   return response.ok
     ? ({ kind: "updated" as const })
     : ({ kind: "invalid_or_expired_token" as const });
 }
 
 async function ensureSupabasePhoneUser(phone: string, password: string) {
-  const config = getSupabaseConfig();
-  if (!config) throw new Error("Supabase authentication is not configured.");
-  const createResponse = await fetch(`${config.url}/auth/v1/admin/users`, {
+  if (!hasSupabaseAuthAccess()) throw new Error("Supabase authentication is not configured.");
+  const createResponse = await supabaseRequest("/auth/v1/admin/users", {
     method: "POST",
-    headers: {
-      apikey: config.serviceRoleKey,
-      Authorization: `Bearer ${config.serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({
       phone,
       password,
       phone_confirm: true,
       user_metadata: { phone },
     }),
-  });
+  }, "service");
 
   if (createResponse.ok) {
     const created = (await createResponse.json()) as { id?: string };
     if (created.id) return { userId: created.id, password };
   }
 
-  const listResponse = await fetch(`${config.url}/auth/v1/admin/users?per_page=1000&page=1`, {
-    headers: {
-      apikey: config.serviceRoleKey,
-      Authorization: `Bearer ${config.serviceRoleKey}`,
-    },
-  });
+  const listResponse = await supabaseRequest("/auth/v1/admin/users?per_page=1000&page=1", {}, "service");
   if (!listResponse.ok) throw new Error("Unable to load Supabase user records.");
   const payload = (await listResponse.json()) as { users?: Array<{ id?: string; phone?: string }> };
   const user = payload.users?.find((candidate) => candidate.phone === phone);
   if (!user?.id) throw new Error("Unable to provision the Supabase phone identity.");
 
-  const updateResponse = await fetch(`${config.url}/auth/v1/admin/users/${user.id}`, {
+  const updateResponse = await supabaseRequest(`/auth/v1/admin/users/${user.id}`, {
     method: "PUT",
-    headers: {
-      apikey: config.serviceRoleKey,
-      Authorization: `Bearer ${config.serviceRoleKey}`,
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ password, phone_confirm: true }),
-  });
+  }, "service");
   if (!updateResponse.ok) throw new Error("Unable to refresh the Supabase phone identity.");
   return { userId: user.id, password };
 }
 
 async function authenticateSupabasePhone(phone: string, password: string) {
-  const config = getSupabaseConfig();
-  if (!config) return { kind: "not_configured" as const };
-  const response = await fetch(`${config.url}/auth/v1/token?grant_type=password`, {
+  if (!hasSupabaseAuthAccess()) return { kind: "not_configured" as const };
+  const response = await supabaseRequest("/auth/v1/token?grant_type=password", {
     method: "POST",
-    headers: {
-      apikey: config.anonKey,
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ phone, password }),
-  });
-  if (!response.ok) return { kind: "invalid_credentials" as const };
+  }, "anon");
+  if (!response.ok) {
+    const body = await response.text();
+    if (response.status === 422 && body.includes("phone_provider_disabled")) {
+      return { kind: "phone_auth_disabled" as const };
+    }
+    return { kind: "invalid_credentials" as const };
+  }
   const payload = (await response.json()) as { user?: { id?: string } };
   return payload.user?.id
     ? ({ kind: "authenticated" as const, userId: payload.user.id })
@@ -573,7 +579,7 @@ async function requestOtpChallenge(
   requestIp?: string | null,
 ) {
   const normalizedPhone = normalizeBangladeshiPhone(phone);
-  if (!process.env.SESSION_SECRET || !process.env.SUPABASE_SERVICE_ROLE_KEY || !process.env.SMS_API_KEY) {
+  if (!process.env.SESSION_SECRET || !hasSupabaseServiceAccess() || !process.env.SMS_API_KEY) {
     return { kind: "not_configured" as const };
   }
   if (purpose === "admin_setup" && normalizedPhone !== configuredAdminPhone()) {
