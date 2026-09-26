@@ -8,6 +8,7 @@ import {
   time,
   text,
   timestamp,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { z } from "zod/v4";
@@ -39,6 +40,7 @@ export const transactionStatus = pgEnum("transaction_status", [
   "cancelled",
 ]);
 export const paymentStatus = pgEnum("payment_status", ["paid", "pending", "cancelled"]);
+export const userRole = pgEnum("user_role", ["member", "staff", "admin", "super_admin"]);
 
 export const booksTable = pgTable("books", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -74,6 +76,7 @@ export const membersTable = pgTable("members", {
   subscriptionStart: date("subscription_start", { mode: "string" }),
   subscriptionEnd: date("subscription_end", { mode: "string" }),
   plan: text("plan").notNull().default("Student"),
+  role: userRole("role").notNull().default("member"),
   depositAmount: numeric("deposit_amount", { precision: 10, scale: 2 })
     .notNull()
     .default("300"),
@@ -87,6 +90,28 @@ export const membersTable = pgTable("members", {
     .default("0"),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const userRolesTable = pgTable(
+  "user_roles",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id").notNull(),
+    role: userRole("role").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdBy: uuid("created_by"),
+  },
+  (table) => [uniqueIndex("user_roles_user_role_idx").on(table.userId, table.role)],
+);
+
+export const adminSessionsTable = pgTable("admin_sessions", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  userId: uuid("user_id").notNull(),
+  tokenHash: text("token_hash").notNull().unique(),
+  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
 export const borrowRequestsTable = pgTable("borrow_requests", {

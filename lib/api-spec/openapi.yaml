@@ -28,6 +28,43 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /auth/admin/login:
+    post:
+      operationId: adminLogin
+      tags: [auth]
+      summary: Sign in an administrator through Supabase Auth
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AdminLoginInput" }
+      responses:
+        "200":
+          description: Authenticated admin session
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAuthSession" }
+        "401": { description: Invalid credentials }
+        "403": { description: Authenticated account is not an administrator }
+        "503": { description: Admin authentication is not configured }
+  /auth/admin/session:
+    get:
+      operationId: getAdminSession
+      tags: [auth]
+      summary: Get the current administrator session
+      responses:
+        "200":
+          description: Current session state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AdminAuthSession" }
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: End the current session
+      responses:
+        "204": { description: Session ended }
   /dashboard:
     get:
       operationId: getDashboard
@@ -155,6 +192,21 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BorrowRequest" }
+  /admin/requests:
+    get:
+      operationId: listAdminBorrowRequests
+      tags: [admin]
+      summary: List all borrow requests for authorized staff
+      responses:
+        "200":
+          description: Borrow requests
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/BorrowRequest" }
+        "401": { description: Authentication required }
+        "403": { description: Administrator role required }
   /my-books:
     get:
       operationId: listMyBooks
@@ -340,6 +392,25 @@ paths:
               schema: { $ref: "#/components/schemas/Analytics" }
 components:
   schemas:
+    AdminLoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1 }
+        rememberSession: { type: boolean, default: false }
+    AdminAuthSession:
+      type: object
+      required: [authenticated, user]
+      properties:
+        authenticated: { type: boolean }
+        user:
+          type: ["object", "null"]
+          properties:
+            email: { type: string }
+            name: { type: string }
+            role: { type: string, enum: [staff, admin, super_admin] }
+          required: [email, name, role]
     HealthStatus:
       type: object
       properties:

@@ -3,7 +3,7 @@
 
 create extension if not exists "pgcrypto";
 
-create type public.user_role as enum ('member', 'staff', 'admin');
+create type public.user_role as enum ('member', 'staff', 'admin', 'super_admin');
 create type public.book_status as enum ('available', 'rented', 'lost');
 create type public.request_status as enum (
   'pending', 'approved', 'rejected', 'rescheduled', 'collected', 'returned'
@@ -34,7 +34,7 @@ create table public.members (
   subscription_plan integer not null default 49 check (subscription_plan in (29, 49)),
   subscription_start date,
   subscription_end date,
-  role text not null default 'member' check (role in ('member', 'staff', 'admin')),
+  role text not null default 'member' check (role in ('member', 'staff', 'admin', 'super_admin')),
   deposit_amount numeric(10, 2) not null default 300 check (deposit_amount >= 0),
   deposit_status text not null default 'unpaid'
     check (deposit_status in ('paid', 'unpaid', 'partially_paid', 'waived')),
@@ -140,6 +140,25 @@ create table public.notifications (
   created_at timestamptz not null default now()
 );
 
+create table public.user_roles (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  role public.user_role not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid references auth.users(id) on delete set null,
+  unique (user_id, role)
+);
+
+create table public.admin_sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  token_hash text not null unique,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  last_seen_at timestamptz not null default now()
+);
+
 create index books_title_idx on public.books using gin (to_tsvector('simple', title));
 create index books_author_idx on public.books (author);
 create index books_category_idx on public.books (category);
@@ -181,8 +200,11 @@ security definer
 set search_path = public
 as $$
   select exists (
+    select 1 from public.user_roles
+    where user_id = auth.uid() and role in ('staff', 'admin', 'super_admin')
+  ) or exists (
     select 1 from public.members
-    where id = auth.uid() and role in ('staff', 'admin')
+    where auth_user_id = auth.uid() and role in ('staff', 'admin', 'super_admin')
   );
 $$;
 
@@ -195,6 +217,8 @@ alter table public.payments enable row level security;
 alter table public.subscriptions enable row level security;
 alter table public.wishlist enable row level security;
 alter table public.notifications enable row level security;
+alter table public.user_roles enable row level security;
+alter table public.admin_sessions enable row level security;
 
 create policy "members can read their profile" on public.profiles
 for select using (id = auth.uid() or public.is_staff());
@@ -211,9 +235,14 @@ for select to authenticated using (true);
 create policy "staff can manage books" on public.books
 for all to authenticated using (public.is_staff()) with check (public.is_staff());
 create policy "members can read their requests" on public.borrow_requests
-for select using (member_id = auth.uid() or public.is_staff());
+for select using (
+  member_id in (select id from public.members where auth_user_id = auth.uid())
+  or public.is_staff()
+);
 create policy "members can create their requests" on public.borrow_requests
-for insert with check (member_id = auth.uid());
+for insert with check (
+  member_id in (select id from public.members where auth_user_id = auth.uid())
+);
 create policy "staff can update requests" on public.borrow_requests
 for update using (public.is_staff()) with check (public.is_staff());
 create policy "members can read their transactions" on public.transactions
@@ -223,8 +252,23 @@ for all to authenticated using (public.is_staff()) with check (public.is_staff()
 create policy "staff can manage payments" on public.payments
 for all to authenticated using (public.is_staff()) with check (public.is_staff());
 create policy "members can read their subscriptions" on public.subscriptions
-for select using (member_id = auth.uid() or public.is_staff());
+for select using (
+  member_id in (select id from public.members where auth_user_id = auth.uid())
+  or public.is_staff()
+);
 create policy "members can manage their wishlist" on public.wishlist
-for all using (member_id = auth.uid()) with check (member_id = auth.uid());
+for all using (
+  member_id in (select id from public.members where auth_user_id = auth.uid())
+) with check (
+  member_id in (select id from public.members where auth_user_id = auth.uid())
+);
 create policy "members can read their notifications" on public.notifications
-for select using (member_id = auth.uid() or public.is_staff());
+for select using (
+  member_id in (select id from public.members where auth_user_id = auth.uid())
+  or public.is_staff()
+);
+create policy "members can read their payments" on public.payments
+for select using (
+  member_id in (select id from public.members where auth_user_id = auth.uid())
+  or public.is_staff()
+);

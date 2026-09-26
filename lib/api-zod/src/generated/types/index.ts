@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './adminAuthSession';
+export * from './adminAuthSessionUser';
+export * from './adminAuthSessionUserRole';
+export * from './adminLoginInput';
 export * from './analytics';
 export * from './analyticsMonthlyBorrowingItem';
 export * from './book';

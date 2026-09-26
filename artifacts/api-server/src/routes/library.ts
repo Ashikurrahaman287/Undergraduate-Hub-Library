@@ -24,6 +24,7 @@ import {
   UpdateBorrowRequestStatusBody,
   UpdateBorrowRequestStatusParams,
 } from "@workspace/api-zod";
+import { requireAdmin } from "../auth";
 
 const router: IRouter = Router();
 const DEMO_MEMBER_ID = "11111111-1111-4111-8111-111111111111";
@@ -465,7 +466,7 @@ router.get("/books", async (req, res) => {
   res.json(books.map(mapBook));
 });
 
-router.post("/books", async (req, res) => {
+router.post("/books", requireAdmin("books.create"), async (req, res) => {
   const body = CreateBookBody.parse(req.body);
   const [book] = await db
     .insert(booksTable)
@@ -490,7 +491,7 @@ router.get("/books/:id", async (req, res) => {
   res.json(mapBook(book));
 });
 
-router.patch("/books/:id", async (req, res) => {
+router.patch("/books/:id", requireAdmin("books.update"), async (req, res) => {
   const { id } = UpdateBookParams.parse(req.params);
   const body = UpdateBookBody.parse(req.body);
   const [book] = await db
@@ -518,6 +519,28 @@ router.patch("/books/:id", async (req, res) => {
 });
 
 router.get("/requests", async (_req, res) => {
+  await ensureSeedData();
+  const requests = await db
+    .select({
+      request: borrowRequestsTable,
+      book: booksTable,
+      member: membersTable,
+      transaction: transactionsTable,
+    })
+    .from(borrowRequestsTable)
+    .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
+    .innerJoin(membersTable, eq(borrowRequestsTable.memberId, membersTable.id))
+    .leftJoin(transactionsTable, eq(borrowRequestsTable.transactionId, transactionsTable.id))
+    .where(eq(borrowRequestsTable.memberId, DEMO_MEMBER_ID))
+    .orderBy(desc(borrowRequestsTable.createdAt));
+  res.json(
+    requests.map(({ request, book, member, transaction }) =>
+      mapBorrowRequest(request, book.title, member.name, member, transaction),
+    ),
+  );
+});
+
+router.get("/admin/requests", requireAdmin("circulation.view"), async (_req, res) => {
   await ensureSeedData();
   const requests = await db
     .select({
@@ -740,7 +763,7 @@ router.post("/requests", async (req, res) => {
     .json(mapBorrowRequest(request, book?.title ?? "Book", member.name, member, transaction));
 });
 
-router.patch("/requests/:id/status", async (req, res) => {
+router.patch("/requests/:id/status", requireAdmin("circulation.approve"), async (req, res) => {
   const { id } = UpdateBorrowRequestStatusParams.parse(req.params);
   const body = UpdateBorrowRequestStatusBody.parse(req.body);
   if (body.status === "rejected" && !body.note?.trim()) {
@@ -874,13 +897,13 @@ router.patch("/requests/:id/status", async (req, res) => {
   );
 });
 
-router.get("/members", async (_req, res) => {
+router.get("/members", requireAdmin("members.view"), async (_req, res) => {
   await ensureSeedData();
   const members = await db.select().from(membersTable).orderBy(asc(membersTable.name));
   res.json(members.map(mapMember));
 });
 
-router.post("/members", async (req, res) => {
+router.post("/members", requireAdmin("members.create"), async (req, res) => {
   const body = req.body as {
     name: string;
     email?: string | null;
@@ -914,7 +937,7 @@ router.post("/members", async (req, res) => {
   res.status(201).json(mapMember(member));
 });
 
-router.patch("/members/:id", async (req, res) => {
+router.patch("/members/:id", requireAdmin("members.update"), async (req, res) => {
   const body = req.body as {
     name?: string;
     email?: string | null;
@@ -945,7 +968,7 @@ router.patch("/members/:id", async (req, res) => {
         body.subscriptionPlan === undefined ? undefined : `${body.subscriptionPlan} BDT`,
       updatedAt: new Date(),
     })
-    .where(eq(membersTable.id, req.params.id))
+    .where(eq(membersTable.id, String(req.params.id)))
     .returning();
   if (!member) {
     res.status(404).json({ error: "Member not found" });
@@ -954,7 +977,7 @@ router.patch("/members/:id", async (req, res) => {
   res.json(mapMember(member));
 });
 
-router.get("/payments", async (_req, res) => {
+router.get("/payments", requireAdmin("payments.view"), async (_req, res) => {
   await ensureSeedData();
   const payments = await db
     .select({ payment: paymentsTable, member: membersTable })
@@ -976,7 +999,7 @@ router.get("/payments", async (_req, res) => {
   );
 });
 
-router.post("/payments", async (req, res) => {
+router.post("/payments", requireAdmin("payments.create"), async (req, res) => {
   await ensureSeedData();
   const body = RecordPaymentBody.parse(req.body);
   const [payment] = await db
@@ -1002,7 +1025,7 @@ router.post("/payments", async (req, res) => {
   });
 });
 
-router.get("/analytics", async (_req, res) => {
+router.get("/analytics", requireAdmin("analytics.view"), async (_req, res) => {
   await ensureSeedData();
   const [books, members, requests] = await Promise.all([
     db.select({ status: booksTable.status, count: count() }).from(booksTable).groupBy(booksTable.status),

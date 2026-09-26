@@ -5,6 +5,37 @@
  * Undergraduate Hub library and book exchange API
  * OpenAPI spec version: 0.1.0
  */
+export interface AdminLoginInput {
+  email: string;
+  /** @minLength 1 */
+  password: string;
+  rememberSession?: boolean;
+}
+
+export type AdminAuthSessionUserRole = typeof AdminAuthSessionUserRole[keyof typeof AdminAuthSessionUserRole];
+
+
+export const AdminAuthSessionUserRole = {
+  staff: 'staff',
+  admin: 'admin',
+  super_admin: 'super_admin',
+} as const;
+
+/**
+ * @nullable
+ */
+export type AdminAuthSessionUser = {
+  email: string;
+  name: string;
+  role: AdminAuthSessionUserRole;
+} | null;
+
+export interface AdminAuthSession {
+  authenticated: boolean;
+  /** @nullable */
+  user: AdminAuthSessionUser;
+}
+
 export interface HealthStatus {
   status: string;
 }

@@ -18,6 +18,47 @@ export const HealthCheckResponse = zod.object({
 
 
 /**
+ * @summary Sign in an administrator through Supabase Auth
+ */
+
+export const adminLoginBodyRememberSessionDefault = false;
+
+export const AdminLoginBody = zod.object({
+  "email": zod.string().email(),
+  "password": zod.string().min(1),
+  "rememberSession": zod.boolean().default(adminLoginBodyRememberSessionDefault)
+})
+
+export const AdminLoginResponse = zod.object({
+  "authenticated": zod.boolean(),
+  "user": zod.object({
+  "email": zod.string(),
+  "name": zod.string(),
+  "role": zod.enum(['staff', 'admin', 'super_admin'])
+}).nullable()
+})
+
+
+/**
+ * @summary Get the current administrator session
+ */
+export const GetAdminSessionResponse = zod.object({
+  "authenticated": zod.boolean(),
+  "user": zod.object({
+  "email": zod.string(),
+  "name": zod.string(),
+  "role": zod.enum(['staff', 'admin', 'super_admin'])
+}).nullable()
+})
+
+
+/**
+ * @summary End the current session
+ */
+export const LogoutResponse = zod.void()
+
+
+/**
  * @summary Get the member dashboard
  */
 export const GetDashboardResponse = zod.object({
@@ -244,6 +285,31 @@ export const CreateBorrowRequestResponse = zod.object({
   "approvedPickupTime": zod.string().nullish(),
   "createdAt": zod.string()
 })
+
+
+/**
+ * @summary List all borrow requests for authorized staff
+ */
+export const ListAdminBorrowRequestsResponseItem = zod.object({
+  "id": zod.string().uuid(),
+  "bookId": zod.string().uuid(),
+  "bookTitle": zod.string(),
+  "memberName": zod.string(),
+  "pickupDate": zod.string(),
+  "pickupSlot": zod.string(),
+  "status": zod.string(),
+  "note": zod.string().nullish(),
+  "dueDate": zod.string().nullish(),
+  "lateFee": zod.number(),
+  "memberPhone": zod.string().nullish(),
+  "university": zod.string().nullish(),
+  "depositStatus": zod.string().nullish(),
+  "subscriptionStatus": zod.string().nullish(),
+  "approvedPickupDate": zod.string().nullish(),
+  "approvedPickupTime": zod.string().nullish(),
+  "createdAt": zod.string()
+})
+export const ListAdminBorrowRequestsResponse = zod.array(ListAdminBorrowRequestsResponseItem)
 
 
 /**
