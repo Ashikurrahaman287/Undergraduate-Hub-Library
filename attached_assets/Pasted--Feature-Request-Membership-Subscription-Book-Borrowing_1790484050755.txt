@@ -1,0 +1,258 @@
+## Feature Request: Membership, Subscription & Book Borrowing Payment Workflow
+
+Implement a complete **Member Registration → Membership Payment → Admin Approval → Subscription Selection → Book Borrowing Payment → Admin Approval → Delivery Scheduling** workflow.
+
+### 1. Member Account Creation
+
+When a new user creates a member account:
+
+* The account should initially have a **Pending Membership** status.
+* The member cannot borrow books until their membership is approved.
+* The system should clearly show the required initial membership fee:
+
+**Membership Fee: 99 BDT**
+
+The member must pay this fee through:
+
+* **bKash**
+* **Nagad**
+
+No online payment gateway is required. The system only records the payment and TXID.
+
+---
+
+### 2. Membership Payment Submission
+
+After paying 99 BDT through bKash or Nagad, the member must submit:
+
+* Payment method: **bKash / Nagad**
+* Transaction ID (**TXID**)
+* Payment amount
+* Payment date/time
+* Optional payment screenshot
+
+The payment should then receive:
+
+**Status: Pending Admin Verification**
+
+The member should see a message such as:
+
+> **Your membership payment has been submitted and is waiting for admin verification.**
+
+---
+
+### 3. Admin Membership Verification
+
+The payment request should appear in the Admin Panel.
+
+Admin should be able to see:
+
+* Member name
+* Member ID
+* Phone number
+* Payment method
+* Amount
+* TXID
+* Submission date/time
+* Payment screenshot, if provided
+
+Admin has two options:
+
+**Approve**
+
+* Membership becomes active.
+* Member can proceed to subscription selection.
+
+**Decline**
+
+* Membership remains inactive.
+* Admin should provide a decline/rejection reason.
+* Member should receive a notification explaining that the payment was declined.
+
+Every approval/decline action should be recorded in the audit log.
+
+---
+
+### 4. Admin Assigns Subscription Category
+
+Once the initial 99 BDT membership payment is approved, the admin can assign a subscription plan to the member.
+
+The subscription amount should **not be hardcoded**.
+
+Admin should be able to enter/set the subscription amount, for example:
+
+* **29 BDT / Month**
+* **49 BDT / Month**
+* **99 BDT / Month**
+
+The admin should be able to create or select subscription plans from the Admin Panel.
+
+Each plan should contain:
+
+* Plan name
+* Monthly price
+* Duration
+* Description
+* Active/inactive status
+
+---
+
+### 5. Member Selects/Pays Subscription
+
+Once the member has an approved membership and an assigned subscription plan:
+
+* The member can see their subscription fee.
+* The member must pay the required subscription fee through **bKash or Nagad**.
+* The member submits the payment TXID.
+* Optional payment screenshot can also be uploaded.
+
+Example:
+
+> **Your subscription: 49 BDT / Month**
+
+After submitting the payment:
+
+**Subscription Status → Pending Admin Verification**
+
+The member cannot borrow a book until the subscription payment is approved.
+
+---
+
+### 6. Book Availability
+
+The website should display the current availability of books.
+
+Each book should clearly show:
+
+**Available**
+
+or
+
+**Currently Borrowed / Unavailable**
+
+Members should only be able to request books that are currently available.
+
+The member can:
+
+1. Browse/search the library.
+2. Open a book.
+3. See its availability.
+4. Request/borrow the book if available.
+
+---
+
+### 7. Book Borrowing Request
+
+When a member requests an available book:
+
+The system should verify:
+
+* Membership is approved.
+* Subscription is active.
+* Subscription payment is approved.
+* Member does not already have an active borrowed book, according to the library's borrowing rules.
+* Book is currently available.
+
+If all requirements are satisfied, the member can submit the borrowing request.
+
+The request should enter:
+
+**Pending Admin Approval**
+
+---
+
+### 8. Admin Book Approval
+
+The request appears in the Admin Panel.
+
+Admin should see:
+
+* Member name
+* Member ID
+* Phone number
+* Book title
+* Book ID / ISBN
+* Book availability
+* Subscription plan
+* Subscription payment status
+* Borrowing request date
+* Member address/delivery information
+
+Admin can:
+
+**Approve Borrowing Request**
+
+or
+
+**Decline Request**
+
+If declined, admin should be able to enter a reason.
+
+---
+
+### 9. Delivery Scheduling
+
+After approving the book request, the Admin Panel should allow the admin to schedule delivery.
+
+Admin should see the member's delivery information and be able to select:
+
+* Delivery date
+* Available time slot
+* Delivery status
+* Optional admin note
+
+Example:
+
+> **Delivery Scheduled**
+> Date: 5 October 2026
+> Time: 3:00 PM – 5:00 PM
+
+The member should receive a notification when the delivery is scheduled.
+
+---
+
+### 10. Member Dashboard Status
+
+The member dashboard should clearly show the current stage of their account.
+
+Example workflow:
+
+```text
+Account Created
+      ↓
+Membership Payment — 99 BDT
+      ↓
+Pending Admin Verification
+      ↓
+Membership Approved
+      ↓
+Subscription Assigned
+      ↓
+Subscription Payment
+      ↓
+Pending Admin Verification
+      ↓
+Subscription Activated
+      ↓
+Browse Available Books
+      ↓
+Book Borrow Request
+      ↓
+Admin Approval
+      ↓
+Delivery Scheduled
+      ↓
+Book Delivered
+      ↓
+Book Borrowing Active
+```
+
+### Important Requirements
+
+* All payment records must have a unique TXID.
+* Admin approval/decline actions must be logged.
+* Members must receive notifications when their payment/request status changes.
+* Payment credentials/API keys must **never** be stored in frontend code.
+* bKash/Nagad are currently **manual payment methods only**; no automatic payment gateway integration is required.
+* The system should prevent a member from bypassing the approval workflow.
+* All membership, subscription, payment, borrowing, and delivery statuses should be stored in the database and controlled through server-side authorization/RLS.
