@@ -652,9 +652,40 @@ router.post("/admin/subscription-plans", requireAdmin("members.update"), async (
   res.status(201).json(mapPlan(plan));
 });
 
+router.patch("/admin/subscription-plans/:id", requireAdmin("members.update"), async (req, res) => {
+  if (typeof req.body?.active !== "boolean") {
+    res.status(400).json({ error: "Plan active status is required." });
+    return;
+  }
+  const [plan] = await db
+    .update(subscriptionPlansTable)
+    .set({ active: req.body.active, updatedAt: new Date() })
+    .where(eq(subscriptionPlansTable.id, String(req.params.id)))
+    .returning();
+  if (!plan) {
+    res.status(404).json({ error: "Subscription plan not found." });
+    return;
+  }
+  await recordAudit("subscription_plan_status_changed", "subscription_plan", plan.id, { active: plan.active });
+  res.json(mapPlan(plan));
+});
+
 router.patch("/admin/members/:id/subscription", requireAdmin("members.update"), async (req, res) => {
   const memberId = String(req.params.id);
   const planId = typeof req.body?.planId === "string" ? req.body.planId : "";
+  const [memberBeforeAssignment] = await db
+    .select()
+    .from(membersTable)
+    .where(eq(membersTable.id, memberId))
+    .limit(1);
+  if (!memberBeforeAssignment) {
+    res.status(404).json({ error: "Member not found." });
+    return;
+  }
+  if (memberBeforeAssignment.membershipStatus !== "approved") {
+    res.status(409).json({ error: "Approve the member's 99 BDT membership payment before assigning a subscription." });
+    return;
+  }
   const [plan] = await db.select().from(subscriptionPlansTable).where(and(eq(subscriptionPlansTable.id, planId), eq(subscriptionPlansTable.active, true))).limit(1);
   if (!plan) {
     res.status(404).json({ error: "Active subscription plan not found." });
@@ -1161,6 +1192,18 @@ router.post("/requests", requireMember(), async (req, res) => {
     .insert(borrowRequestsTable)
       .values({ ...body, memberId, transactionId: transaction.id })
     .returning();
+  await recordAudit("request_submitted", "borrow_request", request.id, {
+    bookId: book.id,
+    memberId,
+    pickupDate: body.pickupDate,
+    pickupSlot: body.pickupSlot,
+  });
+  await sendNotification({
+    memberId,
+    title: "বই নেওয়ার অনুরোধ পাঠানো হয়েছে",
+    message: `আপনার ${book.title} বই নেওয়ার অনুরোধটি Pending Admin Approval অবস্থায় আছে।`,
+    type: "request_pending",
+  });
   res
     .status(201)
     .json(mapBorrowRequest(request, book?.title ?? "Book", member.name, member, transaction));
@@ -1211,7 +1254,13 @@ router.patch("/requests/:id/status", requireAdmin("circulation.approve"), async 
       res.status(409).json({ error: "This book is no longer available." });
       return;
     }
-    if (member.status !== "active" || !member.subscriptionEnd || member.subscriptionEnd < today) {
+    if (
+      member.status !== "active" ||
+      member.membershipStatus !== "approved" ||
+      member.subscriptionStatus !== "active" ||
+      !member.subscriptionEnd ||
+      member.subscriptionEnd < today
+    ) {
       res.status(400).json({ error: "The member must have an active subscription." });
       return;
     }
@@ -1396,6 +1445,14 @@ router.patch("/requests/:id/status", requireAdmin("circulation.approve"), async 
       type: "request_approved",
     });
   }
+  if (nextStatus === "rejected") {
+    await sendNotification({
+      memberId: member.id,
+      title: "বই নেওয়ার অনুরোধ বাতিল হয়েছে",
+      message: `আপনার বই নেওয়ার অনুরোধটি বাতিল হয়েছে${body.note?.trim() ? `। কারণ: ${body.note.trim()}` : "।"}`,
+      type: "request_rejected",
+    });
+  }
   if (nextStatus === "rescheduled") {
     await sendNotification({
       memberId: member.id,
@@ -1483,9 +1540,7 @@ router.post("/members", requireAdmin("members.create"), async (req, res) => {
       university: body.university.trim(),
       studentId: body.studentId ?? null,
       subscriptionPlan: String(plan),
-      subscriptionStart: new Date().toISOString().slice(0, 10),
-      subscriptionEnd: new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
-      plan: `${plan} BDT`,
+      plan: "Student",
     })
     .returning();
   await recordAudit("member_created", "member", member.id, {
