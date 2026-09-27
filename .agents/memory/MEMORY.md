@@ -1,2 +1,3 @@
 - [Imported database setup](imported-database-setup.md) — imported workspace apps may need a development schema push before API routes can query their tables.
 - [Admin access policy](admin-access-policy.md) — administrator access is restricted to the configured phone allowlist; member auth remains separate.
+- [Supabase JSON requests](supabase-json-requests.md) — Supabase Auth body requests need an explicit JSON content type through both direct and connector transports.

@@ -479,11 +479,15 @@ async function supabaseRequest(
   init: SupabaseRequestInit = {},
   access: "anon" | "service",
 ) {
+  const requestHeaders = { ...(init.headers ?? {}) };
+  if (init.body && !Object.keys(requestHeaders).some((key) => key.toLowerCase() === "content-type")) {
+    requestHeaders["Content-Type"] = "application/json";
+  }
   const config = getSupabaseConfig();
   if (config) {
     const apiKey = access === "service" ? config.serviceRoleKey : config.anonKey;
     if (!apiKey) throw new Error("SUPABASE_SERVICE_ROLE_KEY is not configured.");
-    const headers = new Headers(init.headers);
+    const headers = new Headers(requestHeaders);
     headers.set("apikey", apiKey);
     if (access === "service") headers.set("Authorization", `Bearer ${apiKey}`);
     return fetch(`${config.url}${path}`, { ...init, headers });
@@ -491,7 +495,10 @@ async function supabaseRequest(
   if (!process.env.REPLIT_CONNECTORS_HOSTNAME) {
     throw new Error("Supabase authentication is not configured.");
   }
-  return new ReplitConnectors().proxy("supabase", path, init);
+  return new ReplitConnectors().proxy("supabase", path, {
+    ...init,
+    headers: requestHeaders,
+  });
 }
 
 export async function requestAdminPasswordReset(email: string) {
