@@ -1,0 +1,227 @@
+# Deploying Undergraduate Hub to Vercel
+
+This repository is a pnpm workspace with:
+
+- A Vite + React frontend in `artifacts/undergraduate-hub`
+- An Express API in `artifacts/api-server`
+- A Drizzle/Postgres database package in `lib/db`
+- A Vercel function entry point in `api/index.ts`
+- Vercel routing already configured in `vercel.json`
+
+The frontend and API can be served from one Vercel project. The database and external authentication/SMS services must be reachable from Vercel.
+
+## 1. Choose production services
+
+Before deploying, prepare:
+
+1. A hosted PostgreSQL database with a public or Vercel-reachable connection string.
+2. A Supabase project for the current password and OTP authentication implementation.
+3. An SMS provider compatible with the current `artifacts/api-server/src/services/sms.ts` implementation.
+4. An object storage provider for payment screenshots.
+
+Do not use the Replit development database hostname or Replit object-storage sidecar from Vercel. The current object-storage implementation calls `127.0.0.1:1106`, which only exists inside the Replit environment. Payment screenshot upload will not work on Vercel until `artifacts/api-server/src/lib/object-storage.ts` is changed to use Vercel Blob, Supabase Storage, Google Cloud Storage with normal service-account credentials, or another externally reachable provider.
+
+## 2. Import the repository into Vercel
+
+1. Open Vercel and choose **Add New → Project**.
+2. Import the Git repository containing this workspace.
+3. Set **Root Directory** to the repository root (`.`).
+4. Use Node.js 20.x or newer.
+5. Keep the framework preset as **Other** or **Vite**.
+6. Keep the build settings from `vercel.json`:
+
+```text
+Install Command: pnpm install --frozen-lockfile
+Build Command: pnpm --filter @workspace/undergraduate-hub run build
+Output Directory: artifacts/undergraduate-hub/dist/public
+```
+
+Do not set `artifacts/undergraduate-hub` as the Vercel root directory. The API function and shared workspace packages are at the repository root.
+
+## 3. Add environment variables
+
+Add these variables in the Vercel project under **Settings → Environment Variables**. Add them for **Production** and **Preview** when both environments should work.
+
+### Required database and session variables
+
+```text
+DATABASE_URL
+SESSION_SECRET
+```
+
+Use a separate production database connection string. Generate a new production-only session secret, for example:
+
+```bash
+openssl rand -base64 32
+```
+
+Never commit either value to Git.
+
+### Administrator allowlist
+
+The server only permits administrator access for these two phone numbers:
+
+```text
+ADMIN_PHONE_NUMBERS=01619617036,01845278579
+```
+
+This variable must be present in Vercel. The `.replit` value is not automatically copied to Vercel.
+
+### Supabase authentication
+
+The API uses Supabase's REST authentication endpoints when these variables are present:
+
+```text
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_ANON_KEY=<anon-or-publishable-key>
+SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+```
+
+`SUPABASE_SERVICE_ROLE_KEY` is server-only. Never prefix it with `VITE_` and never expose it in frontend code.
+
+### SMS verification
+
+```text
+SMS_API_KEY=<provider-api-key>
+SMS_API_BASE_URL=https://swiftsms.astgd.com/api/sms/send
+SMS_API_LABEL=transactional
+```
+
+`SMS_API_BASE_URL` and `SMS_API_LABEL` are optional if the defaults are correct. `SMS_API_KEY` is required for administrator and member phone OTP delivery.
+
+### Application origin
+
+Set this to the deployed Vercel origin:
+
+```text
+APP_ORIGIN=https://your-project.vercel.app
+```
+
+After adding a custom domain, update this value to the final HTTPS domain and redeploy. The frontend and API normally share the same origin, so no frontend API URL variable is required.
+
+### Password recovery
+
+If administrator password recovery is used, set:
+
+```text
+ADMIN_PASSWORD_RESET_REDIRECT_URL=https://your-project.vercel.app/admin/reset-password
+```
+
+Configure the same URL in the Supabase authentication settings if Supabase requires an allowlisted redirect URL.
+
+### Storage variables
+
+`PRIVATE_OBJECT_DIR` is used by the current Replit object-storage adapter, but setting it alone will not make that adapter work on Vercel. Replace the adapter first, then add the credentials required by the selected storage provider.
+
+## 4. Apply the production database schema
+
+Do this once against the production database before using the deployed API. Do not run schema changes from the Vercel build command.
+
+A safe local workflow is:
+
+```bash
+vercel env pull .env.production.local
+pnpm install
+pnpm --filter @workspace/db run push
+rm .env.production.local
+```
+
+Check that the production database contains the tables used by the API, including:
+
+- `members`
+- `books`
+- `borrow_requests`
+- `transactions`
+- `payments`
+- `subscription_plans`
+- `notifications`
+- `audit_logs`
+- `admin_sessions`
+- `member_sessions`
+- `otp_challenges`
+- `user_roles`
+
+Do not commit `.env.production.local`.
+
+## 5. Deploy
+
+### Dashboard deployment
+
+Click **Deploy** in the Vercel project after adding the environment variables.
+
+### CLI deployment
+
+From the repository root:
+
+```bash
+vercel login
+vercel
+vercel --prod
+```
+
+The existing `vercel.json` will:
+
+- Build the Vite frontend
+- Serve `artifacts/undergraduate-hub/dist/public`
+- Route `/api/*` to `api/index.ts`
+- Route client-side application paths to `/index.html`
+- Cache built assets for one year
+
+## 6. Verify the deployment
+
+Replace `https://your-project.vercel.app` with the deployed URL:
+
+```bash
+curl -i https://your-project.vercel.app/api/healthz
+curl -i https://your-project.vercel.app/api/books
+```
+
+Expected results:
+
+- `/api/healthz` returns `200` and `{"status":"ok"}`
+- `/api/books` returns `200` with the catalog
+- Member-only routes return `401` when no member session cookie is present
+- Admin-only routes return `401` when no admin session cookie is present
+
+Then test in the browser:
+
+1. Browse the homepage and book detail page.
+2. Create and sign in to a member account.
+3. Open membership status.
+4. Verify OTP delivery.
+5. Submit a payment with a unique TXID.
+6. Sign in to the Admin Portal using one of the two allowlisted numbers.
+7. Confirm an unlisted number and admin email login are rejected.
+8. Test payment screenshot upload after the object-storage adapter has been migrated.
+9. Test borrowing approval, delivery scheduling, and notifications.
+
+Check **Vercel → Deployments → Functions** logs if `/api/*` returns a 500.
+
+## 7. Vercel-specific limitations in the current code
+
+### Payment screenshot uploads
+
+This is the main migration blocker. The current implementation depends on a Replit local sidecar:
+
+```text
+http://127.0.0.1:1106
+```
+
+Move that storage integration to an external provider before relying on screenshot uploads in production.
+
+### Development seeding
+
+The API seed routine runs only when `NODE_ENV` is not `production`. Production data must be inserted through the production database setup process or the protected admin workflows; Vercel will not seed the demo catalog.
+
+### Serverless execution
+
+`api/index.ts` exports the Express app and does not call `listen()`, which is correct for Vercel Functions. Do not use `artifacts/api-server/src/index.ts` as the Vercel entry point because that file starts a long-running server and expects `PORT`.
+
+### Replit-only integrations
+
+The following are not available automatically on Vercel and must be replaced with ordinary environment variables or external services:
+
+- `REPLIT_CONNECTORS_HOSTNAME`
+- Replit object-storage sidecar
+- Replit-managed connector authentication
+- Replit development database hostname
