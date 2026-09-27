@@ -23,6 +23,7 @@ timeoutMs = 20000
 
 [userenv.shared]
 ADMIN_PHONE_NUMBER = "01619617036"
+ADMIN_PHONE_NUMBERS = "01619617036,01845278579"
 
 [nix]
 channel = "stable-25_05"

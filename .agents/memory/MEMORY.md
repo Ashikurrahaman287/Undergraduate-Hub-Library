@@ -1,1 +1,2 @@
 - [Imported database setup](imported-database-setup.md) — imported workspace apps may need a development schema push before API routes can query their tables.
+- [Admin access policy](admin-access-policy.md) — administrator access is restricted to the configured phone allowlist; member auth remains separate.

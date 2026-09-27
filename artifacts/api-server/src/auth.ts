@@ -144,10 +144,22 @@ function createVerificationToken() {
   return randomBytes(32).toString("base64url");
 }
 
-function configuredAdminPhone() {
-  const value = process.env.ADMIN_PHONE_NUMBER;
-  if (!value) throw new Error("ADMIN_PHONE_NUMBER is not configured.");
-  return normalizeBangladeshiPhone(value);
+function configuredAdminPhones() {
+  const configured = [
+    ...(process.env.ADMIN_PHONE_NUMBERS?.split(",") ?? []),
+    ...(process.env.ADMIN_PHONE_NUMBER ? [process.env.ADMIN_PHONE_NUMBER] : []),
+  ].map((value) => value.trim()).filter(Boolean);
+  if (!configured.length) throw new Error("ADMIN_PHONE_NUMBERS is not configured.");
+  return [...new Set(configured.map(normalizeBangladeshiPhone))];
+}
+
+function isConfiguredAdminPhone(value: string | null | undefined) {
+  if (!value) return false;
+  try {
+    return configuredAdminPhones().includes(normalizeBangladeshiPhone(value));
+  } catch {
+    return false;
+  }
 }
 
 function configuredAdminEmail() {
@@ -198,6 +210,7 @@ async function findAdminByUserId(userId: string): Promise<AdminIdentity | null> 
     .where(eq(membersTable.authUserId, userId))
     .limit(1);
   if (!member) return null;
+  if (!isConfiguredAdminPhone(member.phone)) return null;
 
   const [assignment] = await db
     .select({ role: userRolesTable.role })
@@ -644,7 +657,9 @@ export async function authenticateAdminWithCredential(
   password: string,
   channel: VerificationChannel,
 ) {
-  const normalizedIdentifier = channel === "phone" ? normalizeBangladeshiPhone(identifier) : normalizeEmail(identifier);
+  if (channel !== "phone") return { kind: "not_authorized" as const };
+  const normalizedIdentifier = normalizeBangladeshiPhone(identifier);
+  if (!isConfiguredAdminPhone(normalizedIdentifier)) return { kind: "not_authorized" as const };
   const result = await authenticateSupabaseCredential(channel, normalizedIdentifier, password);
   if (result.kind !== "authenticated") return result;
   const identity = await findAdminByUserId(result.userId);
@@ -664,11 +679,11 @@ async function requestOtpChallenge(
 ) {
   const normalizedIdentifier =
     channel === "phone" ? normalizeBangladeshiPhone(identifier) : normalizeEmail(identifier);
+  if (purpose === "admin_setup" && !isConfiguredAdminPhone(normalizedIdentifier)) {
+    return { kind: "not_available" as const };
+  }
   if (!process.env.SESSION_SECRET || !hasSupabaseServiceAccess() || !process.env.SMS_API_KEY) {
     return { kind: "not_configured" as const };
-  }
-  if (purpose === "admin_setup" && normalizedIdentifier !== configuredAdminPhone()) {
-    return { kind: "not_available" as const };
   }
   const now = new Date();
   const [recent] = await db
@@ -746,11 +761,9 @@ async function requestEmailOtp(
   requestIp?: string | null,
 ) {
   const normalizedEmail = normalizeEmail(email);
+  if (purpose === "admin_setup") return { kind: "not_available" as const };
   if (!process.env.SESSION_SECRET || !hasSupabaseAuthAccess()) {
     return { kind: "not_configured" as const };
-  }
-  if (purpose === "admin_setup" && normalizedEmail !== configuredAdminEmail()) {
-    return { kind: "not_available" as const };
   }
   const now = new Date();
   const [recent] = await db
@@ -839,7 +852,9 @@ export async function requestAdminOtp(phone: string, requestIp?: string | null) 
 }
 
 export async function requestAdminEmailOtp(email: string, requestIp?: string | null) {
-  return requestEmailOtp(email, "admin_setup", requestIp);
+  void email;
+  void requestIp;
+  return { kind: "not_available" as const };
 }
 
 async function createVerification(challenge: typeof otpChallengesTable.$inferSelect) {
@@ -856,7 +871,7 @@ async function createVerification(challenge: typeof otpChallengesTable.$inferSel
 
 export async function verifyOtp(phone: string, otp: string, purpose: OtpPurpose) {
   const normalizedPhone = normalizeBangladeshiPhone(phone);
-  if (purpose === "admin_setup" && normalizedPhone !== configuredAdminPhone()) {
+  if (purpose === "admin_setup" && !isConfiguredAdminPhone(normalizedPhone)) {
     return { kind: "invalid" as const };
   }
   if (!/^\d{6}$/.test(otp)) return { kind: "invalid" as const };
@@ -887,9 +902,7 @@ export async function verifyOtp(phone: string, otp: string, purpose: OtpPurpose)
 
 export async function verifyEmailOtp(email: string, otp: string, purpose: OtpPurpose) {
   const normalizedEmail = normalizeEmail(email);
-  if (purpose === "admin_setup" && normalizedEmail !== configuredAdminEmail()) {
-    return { kind: "invalid" as const };
-  }
+  if (purpose === "admin_setup") return { kind: "invalid" as const };
   if (!/^\d{6}$/.test(otp)) return { kind: "invalid" as const };
   const [challenge] = await db
     .select()
@@ -1022,24 +1035,22 @@ export async function setAdminPassword(
   channel: VerificationChannel = "phone",
 ) {
   if (password.length < 8) return { kind: "invalid_password" as const };
+  if (channel !== "phone") return { kind: "invalid_verification" as const };
   const normalizedIdentifier = await consumeVerification(channel, identifier, "admin_setup", verificationToken);
-  const allowedIdentifier =
-    channel === "phone" ? configuredAdminPhone() : configuredAdminEmail();
-  if (!normalizedIdentifier || normalizedIdentifier !== allowedIdentifier) {
+  if (!normalizedIdentifier || !isConfiguredAdminPhone(normalizedIdentifier)) {
     return { kind: "invalid_verification" as const };
   }
   const { userId } = await ensureSupabaseCredentialUser(channel, normalizedIdentifier, password);
   let [member] = await db
     .select()
     .from(membersTable)
-    .where(channel === "phone" ? eq(membersTable.phone, normalizedIdentifier) : eq(membersTable.email, normalizedIdentifier))
+    .where(eq(membersTable.phone, normalizedIdentifier))
     .limit(1);
   if (!member) {
     [member] = await db.insert(membersTable).values({
       authUserId: userId,
       name: "Undergraduate Hub administrator",
-      phone: channel === "phone" ? normalizedIdentifier : null,
-      email: channel === "email" ? normalizedIdentifier : null,
+      phone: normalizedIdentifier,
       university: "Undergraduate Hub",
       role: "admin",
     }).returning();
@@ -1048,7 +1059,6 @@ export async function setAdminPassword(
       authUserId: userId,
       role: "admin",
       status: "active",
-      ...(channel === "email" ? { email: normalizedIdentifier } : {}),
       updatedAt: new Date(),
     }).where(eq(membersTable.id, member.id)).returning();
   }
