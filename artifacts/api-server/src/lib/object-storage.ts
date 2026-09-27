@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { File, Storage } from "@google-cloud/storage";
+import { getSupabaseConfig } from "../auth";
 
 const SIDECAR = "http://127.0.0.1:1106";
 
@@ -17,10 +18,39 @@ export const objectStorageClient = new Storage({
 
 export class ObjectNotFoundError extends Error {}
 
+type StoredFile = {
+  contentType: string;
+  body: Buffer | NodeJS.ReadableStream;
+};
+
 function parsePath(path: string) {
   const parts = path.replace(/^\/+/, "").split("/");
   if (parts.length < 2) throw new Error("Invalid object path.");
   return { bucket: parts[0], name: parts.slice(1).join("/") };
+}
+
+function supabaseStorageConfig() {
+  const config = getSupabaseConfig();
+  const bucket = process.env.SUPABASE_STORAGE_BUCKET || "payment-screenshots";
+  if (!config?.serviceRoleKey) return null;
+  return { ...config, bucket };
+}
+
+function objectName(objectPath: string) {
+  if (!objectPath.startsWith("/objects/")) throw new ObjectNotFoundError();
+  const name = objectPath.slice("/objects/".length);
+  if (!name || name.includes("..") || name.startsWith("/")) {
+    throw new ObjectNotFoundError();
+  }
+  return name;
+}
+
+function supabaseStorageUrl(config: ReturnType<typeof supabaseStorageConfig>, name: string) {
+  if (!config) throw new Error("Supabase Storage is not configured.");
+  return `${config.url}/storage/v1/object/${config.bucket}/${name
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
 }
 
 async function signUrl(bucket: string, name: string) {
@@ -43,18 +73,73 @@ export class ObjectStorageService {
   }
 
   async uploadUrl() {
-    const path = `${this.privateDir()}/payment-screenshots/${randomUUID()}`;
+    const config = supabaseStorageConfig();
+    const screenshotName = `payment-screenshots/${randomUUID()}`;
+    const objectPath = `/objects/${screenshotName}`;
+    if (config) {
+      return {
+        uploadURL: `/api/storage/uploads?objectPath=${encodeURIComponent(objectPath)}`,
+        objectPath,
+      };
+    }
+
+    const path = `${this.privateDir()}/${screenshotName}`;
     const { bucket, name } = parsePath(path);
     const uploadURL = await signUrl(bucket, name);
-    return { uploadURL, objectPath: `/objects/${name}` };
+    return { uploadURL, objectPath };
   }
 
-  async file(objectPath: string): Promise<File> {
-    if (!objectPath.startsWith("/objects/")) throw new ObjectNotFoundError();
+  async upload(objectPath: string, data: Buffer, contentType: string) {
+    const config = supabaseStorageConfig();
+    if (!config) throw new Error("Supabase Storage is not configured.");
+    const response = await fetch(supabaseStorageUrl(config, objectName(objectPath)), {
+      method: "POST",
+      headers: {
+        apikey: config.serviceRoleKey,
+        Authorization: `Bearer ${config.serviceRoleKey}`,
+        "Content-Type": contentType,
+        "x-upsert": "false",
+      },
+      body: data,
+    });
+    if (!response.ok) {
+      throw new Error(`Supabase Storage upload failed with HTTP ${response.status}.`);
+    }
+  }
+
+  async file(objectPath: string): Promise<StoredFile> {
+    const config = supabaseStorageConfig();
+    if (config) {
+      const response = await fetch(
+        `${config.url}/storage/v1/object/authenticated/${config.bucket}/${objectName(objectPath)
+          .split("/")
+          .map(encodeURIComponent)
+          .join("/")}`,
+        {
+          headers: {
+            apikey: config.serviceRoleKey,
+            Authorization: `Bearer ${config.serviceRoleKey}`,
+          },
+        },
+      );
+      if (response.status === 404) throw new ObjectNotFoundError();
+      if (!response.ok) {
+        throw new Error(`Supabase Storage download failed with HTTP ${response.status}.`);
+      }
+      return {
+        contentType: response.headers.get("content-type") || "application/octet-stream",
+        body: Buffer.from(await response.arrayBuffer()),
+      };
+    }
+
     const { bucket, name } = parsePath(`${this.privateDir()}/${objectPath.slice("/objects/".length)}`);
-    const file = objectStorageClient.bucket(bucket).file(name);
+    const file: File = objectStorageClient.bucket(bucket).file(name);
     const [exists] = await file.exists();
     if (!exists) throw new ObjectNotFoundError();
-    return file;
+    const [metadata] = await file.getMetadata();
+    return {
+      contentType: String(metadata.contentType ?? "application/octet-stream"),
+      body: file.createReadStream(),
+    };
   }
 }

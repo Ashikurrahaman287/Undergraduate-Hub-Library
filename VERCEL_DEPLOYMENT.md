@@ -17,9 +17,9 @@ Before deploying, prepare:
 1. A hosted PostgreSQL database with a public or Vercel-reachable connection string.
 2. A Supabase project for the current password and OTP authentication implementation.
 3. An SMS provider compatible with the current `artifacts/api-server/src/services/sms.ts` implementation.
-4. An object storage provider for payment screenshots.
+4. A private Supabase Storage bucket for payment screenshots.
 
-Do not use the Replit development database hostname or Replit object-storage sidecar from Vercel. The current object-storage implementation calls `127.0.0.1:1106`, which only exists inside the Replit environment. Payment screenshot upload will not work on Vercel until `artifacts/api-server/src/lib/object-storage.ts` is changed to use Vercel Blob, Supabase Storage, Google Cloud Storage with normal service-account credentials, or another externally reachable provider.
+Do not use the Replit development database hostname or Replit object-storage sidecar from Vercel. The application uses Supabase Storage when the direct Supabase variables are present and keeps the Replit sidecar only for local development.
 
 ## 2. Import the repository into Vercel
 
@@ -75,9 +75,12 @@ The API uses Supabase's REST authentication endpoints when these variables are p
 SUPABASE_URL=https://<project-ref>.supabase.co
 SUPABASE_ANON_KEY=<anon-or-publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
+SUPABASE_STORAGE_BUCKET=payment-screenshots
 ```
 
 `SUPABASE_SERVICE_ROLE_KEY` is server-only. Never prefix it with `VITE_` and never expose it in frontend code.
+
+Create a private bucket with the same name in Supabase Storage. The API uploads and serves payment screenshots through the server using the service-role key; the bucket is never public.
 
 ### SMS verification
 
@@ -111,7 +114,7 @@ Configure the same URL in the Supabase authentication settings if Supabase requi
 
 ### Storage variables
 
-`PRIVATE_OBJECT_DIR` is used by the current Replit object-storage adapter, but setting it alone will not make that adapter work on Vercel. Replace the adapter first, then add the credentials required by the selected storage provider.
+`SUPABASE_STORAGE_BUCKET` is optional and defaults to `payment-screenshots`. `PRIVATE_OBJECT_DIR` is only used by the Replit development sidecar fallback and should not be used as a Vercel storage configuration.
 
 ## 4. Apply the production database schema
 
@@ -192,22 +195,12 @@ Then test in the browser:
 5. Submit a payment with a unique TXID.
 6. Sign in to the Admin Portal using one of the two allowlisted numbers.
 7. Confirm an unlisted number and admin email login are rejected.
-8. Test payment screenshot upload after the object-storage adapter has been migrated.
+8. Test payment screenshot upload with a private Supabase Storage bucket.
 9. Test borrowing approval, delivery scheduling, and notifications.
 
 Check **Vercel → Deployments → Functions** logs if `/api/*` returns a 500.
 
 ## 7. Vercel-specific limitations in the current code
-
-### Payment screenshot uploads
-
-This is the main migration blocker. The current implementation depends on a Replit local sidecar:
-
-```text
-http://127.0.0.1:1106
-```
-
-Move that storage integration to an external provider before relying on screenshot uploads in production.
 
 ### Development seeding
 
@@ -222,6 +215,6 @@ The API seed routine runs only when `NODE_ENV` is not `production`. Production d
 The following are not available automatically on Vercel and must be replaced with ordinary environment variables or external services:
 
 - `REPLIT_CONNECTORS_HOSTNAME`
-- Replit object-storage sidecar
+- Replit object-storage sidecar (used only when direct Supabase Storage variables are absent)
 - Replit-managed connector authentication
 - Replit development database hostname
