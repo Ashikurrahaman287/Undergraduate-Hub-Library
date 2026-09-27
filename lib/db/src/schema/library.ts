@@ -43,6 +43,17 @@ export const transactionStatus = pgEnum("transaction_status", [
 export const paymentStatus = pgEnum("payment_status", ["paid", "pending", "cancelled"]);
 export const userRole = pgEnum("user_role", ["member", "staff", "admin", "super_admin"]);
 
+export const subscriptionPlansTable = pgTable("subscription_plans", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: text("name").notNull(),
+  monthlyPrice: numeric("monthly_price", { precision: 10, scale: 2 }).notNull(),
+  durationMonths: integer("duration_months").notNull().default(1),
+  description: text("description").notNull().default(""),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const booksTable = pgTable("books", {
   id: uuid("id").defaultRandom().primaryKey(),
   title: text("title").notNull(),
@@ -74,6 +85,9 @@ export const membersTable = pgTable("members", {
   subscriptionPlan: numeric("subscription_plan", { precision: 10, scale: 0 })
     .notNull()
     .default("49"),
+  assignedPlanId: uuid("assigned_plan_id").references(() => subscriptionPlansTable.id),
+  membershipStatus: text("membership_status").notNull().default("pending_membership"),
+  subscriptionStatus: text("subscription_status").notNull().default("unassigned"),
   subscriptionStart: date("subscription_start", { mode: "string" }),
   subscriptionEnd: date("subscription_end", { mode: "string" }),
   plan: text("plan").notNull().default("Student"),
@@ -86,6 +100,7 @@ export const membersTable = pgTable("members", {
   outstandingFees: numeric("outstanding_fees", { precision: 10, scale: 2 })
     .notNull()
     .default("0"),
+  address: text("address"),
   totalBooksRead: numeric("total_books_read", { precision: 10, scale: 0 })
     .notNull()
     .default("0"),
@@ -157,6 +172,10 @@ export const borrowRequestsTable = pgTable("borrow_requests", {
   status: requestStatus("status").notNull().default("pending"),
   note: text("note"),
   dueDate: date("due_date", { mode: "string" }),
+  deliveryDate: date("delivery_date", { mode: "string" }),
+  deliverySlot: text("delivery_slot"),
+  deliveryStatus: text("delivery_status").notNull().default("not_scheduled"),
+  deliveryNote: text("delivery_note"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
@@ -196,9 +215,14 @@ export const paymentsTable = pgTable("payments", {
   type: text("type").notNull().default("subscription"),
   status: text("status").notNull().default("paid"),
   referenceNumber: text("reference_number"),
+  txid: text("txid"),
+  screenshotUrl: text("screenshot_url"),
+  submittedAt: timestamp("submitted_at", { withTimezone: true }).notNull().defaultNow(),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  reviewReason: text("review_reason"),
   paidAt: timestamp("paid_at", { withTimezone: true }).notNull().defaultNow(),
   note: text("note"),
-});
+}, (table) => [uniqueIndex("payments_txid_unique_idx").on(table.txid)]);
 
 export const wishlistsTable = pgTable("wishlists", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -260,6 +284,7 @@ export type Transaction = typeof transactionsTable.$inferSelect;
 export type Wishlist = typeof wishlistsTable.$inferSelect;
 export type Notification = typeof notificationsTable.$inferSelect;
 export type AuditLog = typeof auditLogsTable.$inferSelect;
+export type SubscriptionPlan = typeof subscriptionPlansTable.$inferSelect;
 export type InsertBook = z.infer<typeof insertBookSchema>;
 export type InsertMember = z.infer<typeof insertMemberSchema>;
 export type InsertBorrowRequest = z.infer<typeof insertBorrowRequestSchema>;

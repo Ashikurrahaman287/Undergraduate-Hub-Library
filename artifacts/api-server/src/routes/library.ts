@@ -10,6 +10,7 @@ import {
   wishlistsTable,
   notificationsTable,
   auditLogsTable,
+  subscriptionPlansTable,
   type Book,
 } from "@workspace/db";
 import { sendNotification } from "../services/notification-service";
@@ -30,6 +31,7 @@ const router: IRouter = Router();
 const DEMO_MEMBER_ID = "11111111-1111-4111-8111-111111111111";
 const BORROWING_DAYS = 7;
 const LATE_FEE_PER_DAY = 9;
+const MEMBERSHIP_FEE = 99;
 let seedPromise: Promise<void> | undefined;
 
 function money(value: string | number | null | undefined) {
@@ -77,14 +79,31 @@ function mapMember(member: typeof membersTable.$inferSelect) {
     studentId: member.studentId,
     plan: member.plan,
     subscriptionPlan: money(member.subscriptionPlan),
+    assignedPlanId: member.assignedPlanId,
+    membershipStatus: member.membershipStatus,
+    subscriptionStatus: member.subscriptionStatus,
     subscriptionStart: member.subscriptionStart,
     subscriptionEnd: member.subscriptionEnd,
     depositAmount: money(member.depositAmount),
     depositStatus: member.depositStatus,
     outstandingFees: money(member.outstandingFees),
+    address: member.address,
     status: member.status,
     totalBooksRead: money(member.totalBooksRead),
     joinedAt: member.joinedAt.toISOString(),
+  };
+}
+
+function mapPlan(plan: typeof subscriptionPlansTable.$inferSelect) {
+  return {
+    id: plan.id,
+    name: plan.name,
+    monthlyPrice: money(plan.monthlyPrice),
+    durationMonths: plan.durationMonths,
+    description: plan.description,
+    active: plan.active,
+    createdAt: plan.createdAt.toISOString(),
+    updatedAt: plan.updatedAt.toISOString(),
   };
 }
 
@@ -101,12 +120,14 @@ function mapBorrowRequest(
     bookTitle,
     memberName,
     memberPhone: member?.phone ?? null,
+    memberId: member?.id ?? null,
+    address: member?.address ?? null,
+    bookIsbn: null,
     university: member?.university ?? null,
     depositStatus: member?.depositStatus ?? null,
     subscriptionStatus:
-      member?.subscriptionEnd && member.subscriptionEnd >= new Date().toISOString().slice(0, 10)
-        ? "active"
-        : "expired",
+      member?.subscriptionStatus ?? "unassigned",
+    subscriptionPlan: money(member?.subscriptionPlan),
     approvedPickupDate: transaction?.approvedPickupDate ?? null,
     approvedPickupTime: transaction?.approvedPickupTime ?? null,
     pickupDate: request.pickupDate,
@@ -114,6 +135,10 @@ function mapBorrowRequest(
     status: request.status,
     note: request.note,
     dueDate: request.dueDate,
+    deliveryDate: request.deliveryDate,
+    deliverySlot: request.deliverySlot,
+    deliveryStatus: request.deliveryStatus,
+    deliveryNote: request.deliveryNote,
     lateFee: calculateLateFee(transaction?.dueDate ?? request.dueDate, transaction?.returnDate),
     createdAt: request.createdAt.toISOString(),
   };
@@ -142,6 +167,15 @@ async function ensureSeedData() {
   if (process.env.NODE_ENV === "production") return;
   if (!seedPromise) {
     seedPromise = (async () => {
+      let existingPlans = await db.select().from(subscriptionPlansTable).orderBy(asc(subscriptionPlansTable.monthlyPrice));
+      if (!existingPlans.length) {
+        await db.insert(subscriptionPlansTable).values([
+          { name: "Reader", monthlyPrice: "29", durationMonths: 1, description: "A flexible monthly reading plan." },
+          { name: "Plus", monthlyPrice: "49", durationMonths: 1, description: "More time to keep your next book." },
+          { name: "Annual", monthlyPrice: "99", durationMonths: 3, description: "A longer plan for regular readers." },
+        ]);
+        existingPlans = await db.select().from(subscriptionPlansTable).orderBy(asc(subscriptionPlansTable.monthlyPrice));
+      }
       const existing = await db
         .select({ id: membersTable.id })
         .from(membersTable)
@@ -158,6 +192,9 @@ async function ensureSeedData() {
             depositAmount: "300",
             depositStatus: "paid",
             status: "active",
+            membershipStatus: "approved",
+            subscriptionStatus: "active",
+            assignedPlanId: existingPlans[0]?.id,
             updatedAt: new Date(),
           })
           .where(eq(membersTable.id, DEMO_MEMBER_ID));
@@ -175,7 +212,7 @@ async function ensureSeedData() {
             ),
           )
           .limit(1);
-        const [activeRequest] = existingActiveTransaction
+      const [activeRequest] = existingActiveTransaction
           ? [undefined]
           : await db
               .select({ request: borrowRequestsTable, book: booksTable })
@@ -226,6 +263,9 @@ async function ensureSeedData() {
         plan: "Semester Pass",
         depositStatus: "paid",
         status: "active",
+        membershipStatus: "approved",
+        subscriptionStatus: "active",
+        assignedPlanId: existingPlans[0]?.id,
         outstandingFees: "80",
         depositAmount: "300",
       });
@@ -425,6 +465,333 @@ router.get("/dashboard", requireMember(), async (req, res) => {
           "লাইব্রেরি শুক্রবার দুপুর ২টা পর্যন্ত খোলা থাকবে।",
         ],
   });
+});
+
+router.get("/member/status", requireMember(), async (req, res) => {
+  await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
+  const [member] = await db.select().from(membersTable).where(eq(membersTable.id, memberId)).limit(1);
+  if (!member) {
+    res.status(404).json({ error: "Member not found." });
+    return;
+  }
+  const [plan] = member.assignedPlanId
+    ? await db.select().from(subscriptionPlansTable).where(eq(subscriptionPlansTable.id, member.assignedPlanId)).limit(1)
+    : [undefined];
+  const payments = await db
+    .select()
+    .from(paymentsTable)
+    .where(eq(paymentsTable.memberId, memberId))
+    .orderBy(desc(paymentsTable.submittedAt));
+  const membershipPayment = payments.find((payment) => payment.type === "membership") ?? null;
+  const subscriptionPayment = payments.find((payment) => payment.type === "subscription") ?? null;
+  const activeBorrow = await db
+    .select({ id: transactionsTable.id })
+    .from(transactionsTable)
+    .where(and(eq(transactionsTable.memberId, memberId), or(
+      eq(transactionsTable.status, "approved"),
+      eq(transactionsTable.status, "borrowed"),
+      eq(transactionsTable.status, "overdue"),
+    )))
+    .limit(1);
+  res.json({
+    member: mapMember(member),
+    membershipFee: MEMBERSHIP_FEE,
+    membershipPayment: membershipPayment ? {
+      id: membershipPayment.id,
+      amount: money(membershipPayment.amount),
+      method: membershipPayment.method,
+      txid: membershipPayment.txid ?? membershipPayment.referenceNumber,
+      status: membershipPayment.status,
+      submittedAt: membershipPayment.submittedAt.toISOString(),
+      reviewReason: membershipPayment.reviewReason,
+    } : null,
+    plan: plan ? mapPlan(plan) : null,
+    subscriptionPayment: subscriptionPayment ? {
+      id: subscriptionPayment.id,
+      amount: money(subscriptionPayment.amount),
+      method: subscriptionPayment.method,
+      txid: subscriptionPayment.txid ?? subscriptionPayment.referenceNumber,
+      status: subscriptionPayment.status,
+      submittedAt: subscriptionPayment.submittedAt.toISOString(),
+      reviewReason: subscriptionPayment.reviewReason,
+    } : null,
+    canBorrow:
+      member.membershipStatus === "approved" &&
+      member.subscriptionStatus === "active" &&
+      !activeBorrow.length,
+  });
+});
+
+router.post("/member/payments", requireMember(), async (req, res) => {
+  await ensureSeedData();
+  const memberId = getRequiredMember(req).memberId;
+  const kind = req.body?.kind === "subscription" ? "subscription" : "membership";
+  const method = req.body?.method;
+  const txid = typeof req.body?.txid === "string" ? req.body.txid.trim() : "";
+  const amount = Number(req.body?.amount);
+  const screenshotUrl = typeof req.body?.screenshotUrl === "string" ? req.body.screenshotUrl : null;
+  const paymentDate = typeof req.body?.paymentDate === "string" ? new Date(req.body.paymentDate) : new Date();
+  if (!["bkash", "nagad"].includes(method) || !txid || txid.length < 4 || !Number.isFinite(amount) || amount <= 0) {
+    res.status(400).json({ error: "Choose bKash or Nagad and enter a valid TXID and amount." });
+    return;
+  }
+  if (screenshotUrl && screenshotUrl.length > 500) {
+    res.status(400).json({ error: "Payment screenshot URL is too long." });
+    return;
+  }
+  const [member] = await db.select().from(membersTable).where(eq(membersTable.id, memberId)).limit(1);
+  if (!member) {
+    res.status(404).json({ error: "Member not found." });
+    return;
+  }
+  const [duplicate] = await db.select({ id: paymentsTable.id }).from(paymentsTable).where(eq(paymentsTable.txid, txid)).limit(1);
+  if (duplicate) {
+    res.status(409).json({ error: "This TXID has already been submitted." });
+    return;
+  }
+  let expectedAmount = MEMBERSHIP_FEE;
+  if (kind === "subscription") {
+    if (member.membershipStatus !== "approved") {
+      res.status(403).json({ error: "Membership payment must be approved before choosing a subscription." });
+      return;
+    }
+    if (!member.assignedPlanId) {
+      res.status(400).json({ error: "An administrator has not assigned a subscription plan yet." });
+      return;
+    }
+    const [plan] = await db.select().from(subscriptionPlansTable).where(eq(subscriptionPlansTable.id, member.assignedPlanId)).limit(1);
+    if (!plan || !plan.active) {
+      res.status(400).json({ error: "The assigned subscription plan is not active." });
+      return;
+    }
+    expectedAmount = money(plan.monthlyPrice);
+  } else if (member.membershipStatus === "approved") {
+    res.status(400).json({ error: "Your membership is already approved." });
+    return;
+  }
+  if (amount !== expectedAmount) {
+    res.status(400).json({ error: `The required payment amount is ৳${expectedAmount}.` });
+    return;
+  }
+  const [payment] = await db.transaction(async (tx) => {
+    const [created] = await tx.insert(paymentsTable).values({
+      memberId,
+      amount: String(amount),
+      method,
+      type: kind,
+      status: "pending_admin_verification",
+      referenceNumber: txid,
+      txid,
+      screenshotUrl,
+      paidAt: Number.isNaN(paymentDate.getTime()) ? new Date() : paymentDate,
+    }).returning();
+    await tx.update(membersTable).set({
+      membershipStatus: kind === "membership" ? "pending_verification" : undefined,
+      subscriptionStatus: kind === "subscription" ? "pending_verification" : undefined,
+      updatedAt: new Date(),
+    }).where(eq(membersTable.id, memberId));
+    await tx.insert(auditLogsTable).values({
+      action: "payment_submitted",
+      entityType: "payment",
+      entityId: created.id,
+      metadata: JSON.stringify({ memberId, kind, amount, method, txid }),
+    });
+    return [created];
+  });
+  await sendNotification({
+    memberId,
+    title: kind === "membership" ? "Membership payment submitted" : "Subscription payment submitted",
+    message: "Your payment has been submitted and is waiting for admin verification.",
+    type: "payment_pending",
+  });
+  res.status(201).json({ id: payment.id, status: payment.status, message: "Your payment has been submitted and is waiting for admin verification." });
+});
+
+router.get("/admin/subscription-plans", requireAdmin("members.view"), async (_req, res) => {
+  await ensureSeedData();
+  const plans = await db.select().from(subscriptionPlansTable).orderBy(asc(subscriptionPlansTable.monthlyPrice));
+  res.json(plans.map(mapPlan));
+});
+
+router.post("/admin/subscription-plans", requireAdmin("members.update"), async (req, res) => {
+  const name = typeof req.body?.name === "string" ? req.body.name.trim() : "";
+  const monthlyPrice = Number(req.body?.monthlyPrice);
+  const durationMonths = Number(req.body?.durationMonths ?? 1);
+  const description = typeof req.body?.description === "string" ? req.body.description.trim() : "";
+  if (!name || !Number.isFinite(monthlyPrice) || monthlyPrice <= 0 || !Number.isInteger(durationMonths) || durationMonths < 1) {
+    res.status(400).json({ error: "Enter a plan name, a positive monthly price, and a valid duration." });
+    return;
+  }
+  const [plan] = await db.insert(subscriptionPlansTable).values({
+    name,
+    monthlyPrice: String(monthlyPrice),
+    durationMonths,
+    description,
+  }).returning();
+  await recordAudit("subscription_plan_created", "subscription_plan", plan.id, { name, monthlyPrice, durationMonths });
+  res.status(201).json(mapPlan(plan));
+});
+
+router.patch("/admin/members/:id/subscription", requireAdmin("members.update"), async (req, res) => {
+  const memberId = String(req.params.id);
+  const planId = typeof req.body?.planId === "string" ? req.body.planId : "";
+  const [plan] = await db.select().from(subscriptionPlansTable).where(and(eq(subscriptionPlansTable.id, planId), eq(subscriptionPlansTable.active, true))).limit(1);
+  if (!plan) {
+    res.status(404).json({ error: "Active subscription plan not found." });
+    return;
+  }
+  const [member] = await db.update(membersTable).set({
+    assignedPlanId: plan.id,
+    subscriptionPlan: String(plan.monthlyPrice),
+    plan: plan.name,
+    subscriptionStatus: "assigned",
+    updatedAt: new Date(),
+  }).where(eq(membersTable.id, memberId)).returning();
+  if (!member) {
+    res.status(404).json({ error: "Member not found." });
+    return;
+  }
+  await recordAudit("subscription_assigned", "member", member.id, { planId: plan.id, planName: plan.name });
+  await sendNotification({
+    memberId: member.id,
+    title: "Subscription plan assigned",
+    message: `Your subscription is ${plan.name} at ৳${money(plan.monthlyPrice)}. Submit the payment to continue.`,
+    type: "subscription_assigned",
+  });
+  res.json(mapMember(member));
+});
+
+router.get("/admin/payment-requests", requireAdmin("payments.view"), async (_req, res) => {
+  const rows = await db.select({ payment: paymentsTable, member: membersTable })
+    .from(paymentsTable)
+    .innerJoin(membersTable, eq(paymentsTable.memberId, membersTable.id))
+    .where(or(eq(paymentsTable.status, "pending_admin_verification"), eq(paymentsTable.status, "rejected")))
+    .orderBy(desc(paymentsTable.submittedAt));
+  res.json(rows.map(({ payment, member }) => ({
+    id: payment.id,
+    memberId: member.id,
+    memberName: member.name,
+    memberPhone: member.phone,
+    memberIdLabel: member.id.slice(0, 8).toUpperCase(),
+    address: member.address,
+    type: payment.type,
+    amount: money(payment.amount),
+    method: payment.method,
+    txid: payment.txid ?? payment.referenceNumber,
+    screenshotUrl: payment.screenshotUrl,
+    status: payment.status,
+    submittedAt: payment.submittedAt.toISOString(),
+    reviewReason: payment.reviewReason,
+  })));
+});
+
+router.patch("/admin/payment-requests/:id", requireAdmin("payments.update"), async (req, res) => {
+  const paymentId = String(req.params.id);
+  const nextStatus = req.body?.status === "approved" ? "approved" : req.body?.status === "rejected" ? "rejected" : "";
+  const reason = typeof req.body?.reason === "string" ? req.body.reason.trim() : "";
+  if (!nextStatus || (nextStatus === "rejected" && !reason)) {
+    res.status(400).json({ error: "Choose approve or decline and provide a reason when declining." });
+    return;
+  }
+  const [current] = await db.select({ payment: paymentsTable, member: membersTable })
+    .from(paymentsTable)
+    .innerJoin(membersTable, eq(paymentsTable.memberId, membersTable.id))
+    .where(eq(paymentsTable.id, paymentId)).limit(1);
+  if (!current) {
+    res.status(404).json({ error: "Payment request not found." });
+    return;
+  }
+  if (current.payment.status !== "pending_admin_verification") {
+    res.status(409).json({ error: "This payment request has already been reviewed." });
+    return;
+  }
+  const now = new Date();
+  await db.transaction(async (tx) => {
+    await tx.update(paymentsTable).set({
+      status: nextStatus,
+      reviewedAt: now,
+      reviewReason: nextStatus === "rejected" ? reason : null,
+    }).where(eq(paymentsTable.id, paymentId));
+    if (current.payment.type === "membership") {
+      await tx.update(membersTable).set({
+        membershipStatus: nextStatus === "approved" ? "approved" : "rejected",
+        updatedAt: now,
+      }).where(eq(membersTable.id, current.member.id));
+    } else if (current.payment.type === "subscription") {
+      let endDate: string | undefined;
+      if (nextStatus === "approved") {
+        const [plan] = current.member.assignedPlanId
+          ? await tx.select().from(subscriptionPlansTable).where(eq(subscriptionPlansTable.id, current.member.assignedPlanId)).limit(1)
+          : [undefined];
+        const start = new Date();
+        const duration = plan?.durationMonths ?? 1;
+        endDate = new Date(start.getTime() + duration * 30 * 86400000).toISOString().slice(0, 10);
+      }
+      await tx.update(membersTable).set({
+        subscriptionStatus: nextStatus === "approved" ? "active" : "rejected",
+        subscriptionStart: nextStatus === "approved" ? now.toISOString().slice(0, 10) : undefined,
+        subscriptionEnd: endDate,
+        updatedAt: now,
+      }).where(eq(membersTable.id, current.member.id));
+    }
+    await tx.insert(auditLogsTable).values({
+      action: `payment_${nextStatus}`,
+      entityType: "payment",
+      entityId: paymentId,
+      metadata: JSON.stringify({ memberId: current.member.id, type: current.payment.type, reason: reason || null }),
+    });
+  });
+  await sendNotification({
+    memberId: current.member.id,
+    title: nextStatus === "approved" ? "Payment approved" : "Payment declined",
+    message: nextStatus === "approved"
+      ? `Your ${current.payment.type} payment has been approved.`
+      : `Your ${current.payment.type} payment was declined. Reason: ${reason}`,
+    type: `payment_${nextStatus}`,
+  });
+  res.json({ status: nextStatus });
+});
+
+router.patch("/requests/:id/delivery", requireAdmin("circulation.approve"), async (req, res) => {
+  const deliveryDate = typeof req.body?.deliveryDate === "string" ? req.body.deliveryDate : "";
+  const deliverySlot = typeof req.body?.deliverySlot === "string" ? req.body.deliverySlot.trim() : "";
+  const deliveryStatus = typeof req.body?.deliveryStatus === "string" ? req.body.deliveryStatus : "scheduled";
+  const deliveryNote = typeof req.body?.note === "string" ? req.body.note.trim() : null;
+  if (!deliveryDate || !deliverySlot || !["scheduled", "out_for_delivery", "delivered"].includes(deliveryStatus)) {
+    res.status(400).json({ error: "Delivery date, time slot, and a valid status are required." });
+    return;
+  }
+  const [current] = await db.select({ request: borrowRequestsTable, member: membersTable, book: booksTable })
+    .from(borrowRequestsTable)
+    .innerJoin(membersTable, eq(borrowRequestsTable.memberId, membersTable.id))
+    .innerJoin(booksTable, eq(borrowRequestsTable.bookId, booksTable.id))
+    .where(eq(borrowRequestsTable.id, String(req.params.id))).limit(1);
+  if (!current) {
+    res.status(404).json({ error: "Borrowing request not found." });
+    return;
+  }
+  if (!["approved", "rescheduled", "collected"].includes(current.request.status)) {
+    res.status(409).json({ error: "Approve the borrowing request before scheduling delivery." });
+    return;
+  }
+  await db.update(borrowRequestsTable).set({
+    deliveryDate,
+    deliverySlot,
+    deliveryStatus,
+    deliveryNote,
+    updatedAt: new Date(),
+  }).where(eq(borrowRequestsTable.id, current.request.id));
+  await recordAudit("delivery_scheduled", "borrow_request", current.request.id, { deliveryDate, deliverySlot, deliveryStatus });
+  await sendNotification({
+    memberId: current.member.id,
+    title: deliveryStatus === "delivered" ? "Book delivered" : "Delivery scheduled",
+    message: deliveryStatus === "delivered"
+      ? `Your book ${current.book.title} was marked as delivered.`
+      : `Delivery scheduled for ${deliveryDate}, ${deliverySlot}.`,
+    type: "delivery",
+  });
+  res.json({ deliveryDate, deliverySlot, deliveryStatus, deliveryNote });
 });
 
 router.get("/books", async (req, res) => {
@@ -698,13 +1065,15 @@ router.post("/requests", requireMember(), async (req, res) => {
   const today = new Date().toISOString().slice(0, 10);
   if (
     !member ||
-    member.status !== "active" ||
+    member.status === "suspended" ||
+    member.membershipStatus !== "approved" ||
+    member.subscriptionStatus !== "active" ||
     !member.subscriptionEnd ||
     member.subscriptionEnd < today
   ) {
     res.status(400).json({
-      error: "আপনার subscription মেয়াদ শেষ হয়েছে। নতুন বই নিতে আগে subscription renew করুন।",
-      code: "SUBSCRIPTION_EXPIRED",
+      error: "Membership and an approved active subscription payment are required before borrowing.",
+      code: "BORROWING_APPROVAL_REQUIRED",
     });
     return;
   }

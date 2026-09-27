@@ -223,7 +223,7 @@ async function findMemberByUserId(userId: string): Promise<MemberIdentity | null
     .from(membersTable)
     .where(eq(membersTable.authUserId, userId))
     .limit(1);
-  if (!member || member.status !== "active") return null;
+  if (!member || member.status === "suspended") return null;
   return { userId, memberId: member.id, phone: member.phone ?? "", name: member.name };
 }
 
