@@ -68,6 +68,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
 import { WishlistPage } from '@/pages/wishlist-page';
+import { AdminMembershipPage, MemberMembershipPage, MembershipStagePreview } from '@/pages/membership-workflow';
 import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation, useParams } from 'wouter';
 
 const queryClient = new QueryClient();
@@ -272,7 +273,7 @@ function Router() {
   const adminSession = useGetAdminSession();
   const memberSession = useMemberSession();
   const isAdminRoute = location === '/admin' || location.startsWith('/admin/');
-  const isMemberRoute = ['/dashboard', '/wishlist', '/my-books', '/requests', '/account'].some((path) => location === path || location.startsWith(`${path}/`));
+  const isMemberRoute = ['/dashboard', '/wishlist', '/my-books', '/requests', '/account', '/membership'].some((path) => location === path || location.startsWith(`${path}/`));
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
     await Promise.all([adminSession.refetch(), memberSession.refresh()]);
@@ -295,6 +296,7 @@ function Router() {
         <Route path="/admin/requests" component={AdminRequestsPage} />
         <Route path="/admin/members" component={MembersPage} />
         <Route path="/admin/payments" component={PaymentsPage} />
+        <Route path="/admin/membership" component={AdminMembershipPage} />
         <Route path="/admin/analytics" component={AnalyticsPage} />
         <Route component={NotFound} />
       </Switch></Shell>;
@@ -313,6 +315,7 @@ function Router() {
     <Route path="/my-books" component={MyBooksPage} />
     <Route path="/requests" component={RequestsPage} />
     <Route path="/account" component={AccountPage} />
+     <Route path="/membership" component={MemberMembershipPage} />
      <Route path="/login"><MemberLoginPage onAuthenticated={() => { void memberSession.refresh(); setLocation('/dashboard'); }} /></Route>
     <Route component={NotFound} />
   </Switch></Shell>;
@@ -327,8 +330,8 @@ function Shell({ children, adminMode = false, adminUser, memberUser, onLogout }:
     month: 'long',
     year: 'numeric',
   }).format(new Date());
-  const memberNav = [{ href: '/', label: 'Home', bn: 'হোম', icon: LayoutDashboard }, { href: '/books', label: 'Find a book', bn: 'বই খুঁজুন', icon: BookOpen }, { href: '/my-books', label: 'My books', bn: 'আমার বই', icon: LibraryBig }, { href: '/wishlist', label: 'Wishlist', bn: 'পছন্দের বই', icon: Heart }, { href: '/requests', label: 'My requests', bn: 'আমার অনুরোধ', icon: Clock3 }, { href: '/account', label: 'Account', bn: 'অ্যাকাউন্ট', icon: UserRound }];
-  const staffNav = [{ href: '/admin', label: 'Staff overview', icon: LayoutDashboard }, { href: '/admin/books', label: 'Inventory', icon: Boxes }, { href: '/admin/requests', label: 'Requests', icon: PackageCheck }, { href: '/admin/members', label: 'Members', icon: Users }, { href: '/admin/payments', label: 'Payments', icon: WalletCards }, { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 }];
+  const memberNav = [{ href: '/', label: 'Home', bn: 'হোম', icon: LayoutDashboard }, { href: '/books', label: 'Find a book', bn: 'বই খুঁজুন', icon: BookOpen }, { href: '/membership', label: 'Membership', bn: 'সদস্যতা', icon: ShieldCheck }, { href: '/my-books', label: 'My books', bn: 'আমার বই', icon: LibraryBig }, { href: '/wishlist', label: 'Wishlist', bn: 'পছন্দের বই', icon: Heart }, { href: '/requests', label: 'My requests', bn: 'আমার অনুরোধ', icon: Clock3 }, { href: '/account', label: 'Account', bn: 'অ্যাকাউন্ট', icon: UserRound }];
+  const staffNav = [{ href: '/admin', label: 'Staff overview', icon: LayoutDashboard }, { href: '/admin/books', label: 'Inventory', icon: Boxes }, { href: '/admin/requests', label: 'Requests', icon: PackageCheck }, { href: '/admin/membership', label: 'Membership ops', icon: ShieldCheck }, { href: '/admin/members', label: 'Members', icon: Users }, { href: '/admin/payments', label: 'Payments', icon: WalletCards }, { href: '/admin/analytics', label: 'Analytics', icon: BarChart3 }];
   const nav = adminMode ? staffNav : memberNav;
   const [location] = useLocation();
   return (

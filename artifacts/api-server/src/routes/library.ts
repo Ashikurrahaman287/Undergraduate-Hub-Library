@@ -523,6 +523,25 @@ router.get("/member/status", requireMember(), async (req, res) => {
   });
 });
 
+router.patch("/member/profile", requireMember(), async (req, res) => {
+  const memberId = getRequiredMember(req).memberId;
+  const address = typeof req.body?.address === "string" ? req.body.address.trim() : "";
+  if (address.length > 500) {
+    res.status(400).json({ error: "Delivery address must be 500 characters or fewer." });
+    return;
+  }
+  const [member] = await db
+    .update(membersTable)
+    .set({ address: address || null, updatedAt: new Date() })
+    .where(eq(membersTable.id, memberId))
+    .returning();
+  if (!member) {
+    res.status(404).json({ error: "Member not found." });
+    return;
+  }
+  res.json(mapMember(member));
+});
+
 router.post("/member/payments", requireMember(), async (req, res) => {
   await ensureSeedData();
   const memberId = getRequiredMember(req).memberId;

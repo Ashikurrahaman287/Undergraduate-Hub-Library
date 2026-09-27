@@ -240,7 +240,7 @@ export function AdminMembershipPage() {
   const [reviewReason, setReviewReason] = useState<Record<string, string>>({});
   const [planForm, setPlanForm] = useState({ name: "", monthlyPrice: "49", durationMonths: "1", description: "" });
   const [assignments, setAssignments] = useState<Record<string, string>>({});
-  const [deliveryForm, setDeliveryForm] = useState<Record<string, { date: string; slot: string; status: string; note: string }>>({});
+  const [deliveryForm, setDeliveryForm] = useState<Record<string, { date: string; slot: string; status: string; note: string; deliveryDate?: string }>>({});
 
   const refresh = async () => {
     setLoading(true);
