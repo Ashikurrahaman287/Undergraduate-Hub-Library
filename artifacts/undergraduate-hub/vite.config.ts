@@ -13,6 +13,7 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
+// Ensure BASE_PATH defaults to '/' for production builds
 const basePath = process.env.BASE_PATH ?? '/';
 
 export default defineConfig({
