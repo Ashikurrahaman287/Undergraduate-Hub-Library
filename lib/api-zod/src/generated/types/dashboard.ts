@@ -5,7 +5,7 @@
  * Undergraduate Hub library and book exchange API
  * OpenAPI spec version: 0.1.0
  */
-import type { DashboardActiveBook } from './dashboardActiveBook';
+import type { DashboardActiveBook } from './dashboardActiveBook.js';
 
 export interface Dashboard {
   memberName: string;

@@ -13,7 +13,7 @@ import {
   subscriptionPlansTable,
   type Book,
 } from "@workspace/db";
-import { sendNotification } from "../services/notification-service";
+import { sendNotification } from "../services/notification-service.js";
 import {
   CreateBookBody,
   CreateBorrowRequestBody,
@@ -25,7 +25,7 @@ import {
   UpdateBorrowRequestStatusBody,
   UpdateBorrowRequestStatusParams,
 } from "@workspace/api-zod";
-import { getRequiredMember, requireAdmin, requireMember } from "../auth";
+import { getRequiredMember, requireAdmin, requireMember } from "../auth.js";
 
 const router: IRouter = Router();
 const DEMO_MEMBER_ID = "11111111-1111-4111-8111-111111111111";

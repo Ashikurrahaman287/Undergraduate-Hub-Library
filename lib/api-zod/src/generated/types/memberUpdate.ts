@@ -5,7 +5,7 @@
  * Undergraduate Hub library and book exchange API
  * OpenAPI spec version: 0.1.0
  */
-import type { MemberUpdateSubscriptionPlan } from './memberUpdateSubscriptionPlan';
+import type { MemberUpdateSubscriptionPlan } from './memberUpdateSubscriptionPlan.js';
 
 export interface MemberUpdate {
   /** @minLength 1 */

@@ -1,7 +1,7 @@
 import { Readable } from "node:stream";
 import express, { Router, type IRouter } from "express";
-import { getAuthenticatedAdmin, getAuthenticatedMember } from "../auth";
-import { ObjectNotFoundError, ObjectStorageService } from "../lib/object-storage";
+import { getAuthenticatedAdmin, getAuthenticatedMember } from "../auth.js";
+import { ObjectNotFoundError, ObjectStorageService } from "../lib/object-storage.js";
 
 const router: IRouter = Router();
 const storage = new ObjectStorageService();

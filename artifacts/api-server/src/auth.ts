@@ -10,8 +10,8 @@ import {
   otpChallengesTable,
   userRolesTable,
 } from "@workspace/db";
-import { normalizeBangladeshiPhone } from "./phone";
-import { sendOtpSms } from "./services/sms";
+import { normalizeBangladeshiPhone } from "./phone.js";
+import { sendOtpSms } from "./services/sms.js";
 
 export const ADMIN_SESSION_COOKIE = "uh_admin_session";
 export const MEMBER_SESSION_COOKIE = "uh_member_session";
@@ -197,7 +197,7 @@ function getCookieValue(request: Request, name: string) {
   return cookie ? decodeURIComponent(cookie.slice(prefix.length)) : undefined;
 }
 
-export { normalizeBangladeshiPhone } from "./phone";
+export { normalizeBangladeshiPhone } from "./phone.js";
 
 function isAdminRole(role: string): role is AdminRole {
   return role === "staff" || role === "admin" || role === "super_admin";
@@ -975,7 +975,7 @@ async function consumeVerification(
 
 async function upsertMemberProfile(
   userId: string,
-  profile: { phone?: string; email?: string },
+  profile: { phone?: string; email?: string; name?: string },
 ) {
   let [member] = await db
     .select()
@@ -991,7 +991,7 @@ async function upsertMemberProfile(
   if (!member) {
     [member] = await db.insert(membersTable).values({
       authUserId: userId,
-      name: "New member",
+      name: profile.name ?? "New member",
       phone: profile.phone ?? null,
       email: profile.email ?? null,
       university: "Other",
@@ -1003,6 +1003,7 @@ async function upsertMemberProfile(
         authUserId: userId,
         ...(profile.phone ? { phone: profile.phone } : {}),
         ...(profile.email ? { email: profile.email } : {}),
+        ...(profile.name && member.name === "New member" ? { name: profile.name } : {}),
         updatedAt: new Date(),
       })
       .where(eq(membersTable.id, member.id))
@@ -1086,6 +1087,56 @@ export async function loginMember(identifier: string, password: string, channel:
   if (result.kind !== "authenticated") return result;
   const session = await createMemberSession(result.member.userId, result.member.memberId);
   return { kind: "authenticated" as const, member: result.member, session };
+}
+
+export async function loginMemberWithGoogleAccessToken(accessToken: string) {
+  if (!hasSupabaseAuthAccess()) return { kind: "not_configured" as const };
+  if (!accessToken || accessToken.length > 8192) {
+    return { kind: "invalid_credentials" as const };
+  }
+
+  const response = await supabaseRequest("/auth/v1/user", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }, "anon");
+  if (!response.ok) return { kind: "invalid_credentials" as const };
+
+  const user = (await response.json()) as {
+    id?: string;
+    email?: string;
+    user_metadata?: { full_name?: unknown; name?: unknown; phone?: unknown };
+    app_metadata?: { provider?: unknown; providers?: unknown };
+  };
+  const userId = user.id;
+  const provider = user.app_metadata?.provider;
+  const providers = user.app_metadata?.providers;
+  if (!userId || (provider !== "google" && (!Array.isArray(providers) || !providers.includes("google")))) {
+    return { kind: "not_authorized" as const };
+  }
+
+  let email: string | undefined;
+  try {
+    if (typeof user.email === "string" && user.email.trim()) {
+      email = normalizeEmail(user.email);
+    }
+  } catch {
+    return { kind: "invalid_credentials" as const };
+  }
+
+  const metadataName =
+    typeof user.user_metadata?.full_name === "string"
+      ? user.user_metadata.full_name
+      : typeof user.user_metadata?.name === "string"
+        ? user.user_metadata.name
+        : undefined;
+  const name = metadataName?.trim().slice(0, 160) || undefined;
+  const profile = await upsertMemberProfile(userId, { email, name });
+  if (profile.authUserId !== userId) return { kind: "not_authorized" as const };
+
+  const member = await findMemberByUserId(userId);
+  if (!member) return { kind: "not_authorized" as const };
+  const session = await createMemberSession(member.userId, member.memberId);
+  return { kind: "authenticated" as const, member, session };
 }
 
 export async function loginAdmin(phone: string, password: string) {

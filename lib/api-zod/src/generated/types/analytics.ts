@@ -5,7 +5,7 @@
  * Undergraduate Hub library and book exchange API
  * OpenAPI spec version: 0.1.0
  */
-import type { AnalyticsMonthlyBorrowingItem } from './analyticsMonthlyBorrowingItem';
+import type { AnalyticsMonthlyBorrowingItem } from './analyticsMonthlyBorrowingItem.js';
 
 export interface Analytics {
   totalBooks: number;

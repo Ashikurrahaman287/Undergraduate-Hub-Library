@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { File, Storage } from "@google-cloud/storage";
-import { getSupabaseConfig } from "../auth";
+import { getSupabaseConfig } from "../auth.js";
 
 const SIDECAR = "http://127.0.0.1:1106";
 

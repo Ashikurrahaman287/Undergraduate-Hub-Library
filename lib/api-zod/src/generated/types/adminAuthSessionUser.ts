@@ -5,7 +5,7 @@
  * Undergraduate Hub library and book exchange API
  * OpenAPI spec version: 0.1.0
  */
-import type { AdminAuthSessionUserRole } from './adminAuthSessionUserRole';
+import type { AdminAuthSessionUserRole } from './adminAuthSessionUserRole.js';
 
 /**
  * @nullable

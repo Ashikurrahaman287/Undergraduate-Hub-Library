@@ -67,6 +67,10 @@ import { ErrorBoundary } from '@/components/error-boundary';
 import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { useToast } from '@/hooks/use-toast';
+import {
+  getSupabaseBrowserClient,
+  isSupabaseBrowserConfigured,
+} from '@/lib/supabase';
 import { WishlistPage } from '@/pages/wishlist-page';
 import { AdminMembershipPage, MemberMembershipPage, MembershipStagePreview } from '@/pages/membership-workflow';
 import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation, useParams } from 'wouter';
@@ -154,13 +158,109 @@ async function responseError(response: Response, fallback: string) {
   }
 }
 
-type AuthChannel = 'phone' | 'email';
+function GoogleSignInButton({ label }: { label: string }) {
+  const [pending, setPending] = useState(false);
+  const [message, setMessage] = useState('');
 
-function ChannelSelector({ channel, onChange }: { channel: AuthChannel; onChange: (channel: AuthChannel) => void }) {
-  return <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-1" role="tablist" aria-label="Verification method">
-    {(['phone', 'email'] as const).map((option) => <button key={option} type="button" role="tab" aria-selected={channel === option} onClick={() => onChange(option)} className={`rounded-lg px-3 py-2 text-sm font-bold transition-colors ${channel === option ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
-      {option === 'phone' ? 'Phone number' : 'Email address'}
-    </button>)}
+  const signIn = async () => {
+    setMessage('');
+    if (!isSupabaseBrowserConfigured()) {
+      setMessage('Google sign-in is not configured for this deployment yet.');
+      return;
+    }
+
+    setPending(true);
+    try {
+      const redirectTo = new URL(
+        `${import.meta.env.BASE_URL}auth/callback`,
+        window.location.origin,
+      ).toString();
+      const { error } = await getSupabaseBrowserClient().auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          queryParams: { prompt: 'select_account' },
+        },
+      });
+      if (error) throw error;
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to start Google sign-in.');
+      setPending(false);
+    }
+  };
+
+  return <div className="space-y-2">
+    <Button type="button" variant="outline" onClick={() => void signIn()} disabled={pending}>
+      <span aria-hidden="true" className="font-extrabold text-blue-600">G</span>
+      {pending ? 'Opening Google…' : label}
+    </Button>
+    {message && <p role="alert" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{message}</p>}
+  </div>;
+}
+
+function GoogleAuthCallbackPage() {
+  const [message, setMessage] = useState('Completing Google sign-in…');
+
+  useEffect(() => {
+    let active = true;
+    let completed = false;
+
+    const finishSignIn = async (accessToken: string) => {
+      if (!active || completed) return;
+      completed = true;
+      try {
+        const response = await fetch('/api/auth/member/google', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ accessToken }),
+        });
+        if (!response.ok) {
+          const error = await responseError(response, 'Unable to complete Google sign-in.');
+          if (active) setMessage(error);
+          return;
+        }
+        if (active) window.location.replace(`${import.meta.env.BASE_URL}dashboard`);
+      } catch {
+        if (active) setMessage('Unable to reach the account service. Please try again.');
+      }
+    };
+
+    try {
+      const client = getSupabaseBrowserClient();
+      const { data: { subscription } } = client.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' && session) void finishSignIn(session.access_token);
+      });
+      void client.auth.getSession().then(({ data, error }) => {
+        if (error) {
+          if (active) setMessage(error.message);
+          return;
+        }
+        if (data.session) void finishSignIn(data.session.access_token);
+        else if (active) setMessage('Google did not return an active session. Please try again.');
+      }).catch(() => {
+        if (active) setMessage('Unable to read the Google sign-in response. Please try again.');
+      });
+
+      return () => {
+        active = false;
+        subscription.unsubscribe();
+      };
+    } catch {
+      setMessage('Google sign-in is not configured for this deployment yet.');
+      return () => {
+        active = false;
+      };
+    }
+  }, []);
+
+  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6">
+    <div className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 text-center shadow-xl">
+      <p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p>
+      <h1 className="font-display text-2xl font-extrabold">Google sign-in</h1>
+      <p role="status" className="text-sm text-muted-foreground">{message}</p>
+      {message !== 'Completing Google sign-in…' && <Link href="/login" className="inline-block text-sm font-bold text-accent-foreground underline">Return to sign in</Link>}
+    </div>
   </div>;
 }
 
@@ -218,19 +318,28 @@ function AdminSetupPage() {
 }
 
 function MemberLoginPage({ onAuthenticated }: { onAuthenticated?: () => void }) {
-  const [channel, setChannel] = useState<AuthChannel>('phone');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const response = await fetch('/api/auth/member/login', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ channel, identifier, password }) });
+    const response = await fetch('/api/auth/member/login', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ phone: identifier, password }) });
     if (response.ok) onAuthenticated?.(); else setMessage(await responseError(response, 'Invalid contact or password.'));
   };
-  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl"><h1 className="font-display text-3xl font-extrabold">Member sign in</h1><p className="text-sm text-muted-foreground">Use your mobile number or email address and password to sign in.</p><ChannelSelector channel={channel} onChange={setChannel} /><label className="block text-sm font-bold">{channel === 'phone' ? 'Mobile number' : 'Email address'}<input type={channel === 'phone' ? 'tel' : 'email'} inputMode={channel === 'phone' ? 'tel' : undefined} autoComplete={channel === 'phone' ? 'tel' : 'email'} required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder={channel === 'phone' ? '01XXXXXXXXX or +8801XXXXXXXXX' : 'you@example.com'} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Password<input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit">Login</Button><div className="flex flex-wrap justify-between gap-3 text-sm font-bold"><Link href="/create-account" className="text-accent-foreground underline">Create account</Link><Link href="/forgot-password" className="text-accent-foreground underline">Forgot password?</Link></div>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/" className="block text-sm font-bold text-accent-foreground underline">Continue browsing books</Link></form></div>;
+  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl"><h1 className="font-display text-3xl font-extrabold">Member sign in</h1><p className="text-sm text-muted-foreground">Sign in with Google or use your mobile number and password.</p><GoogleSignInButton label="Continue with Google" /><div className="flex items-center gap-3 text-xs font-semibold text-muted-foreground"><span className="h-px flex-1 bg-border" /><span>OR USE YOUR PHONE</span><span className="h-px flex-1 bg-border" /></div><label className="block text-sm font-bold">Mobile number<input type="tel" inputMode="tel" autoComplete="tel" required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="01XXXXXXXXX or +8801XXXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Password<input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit">Login with phone</Button><div className="flex flex-wrap justify-between gap-3 text-sm font-bold"><Link href="/create-account" className="text-accent-foreground underline">Create account</Link><Link href="/forgot-password" className="text-accent-foreground underline">Forgot password?</Link></div>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/" className="block text-sm font-bold text-accent-foreground underline">Continue browsing books</Link></form></div>;
 }
 
-function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
+type AuthChannel = 'phone' | 'email';
+
+function ChannelSelector({ channel, onChange }: { channel: AuthChannel; onChange: (channel: AuthChannel) => void }) {
+  return <div className="grid grid-cols-2 gap-2 rounded-xl bg-muted p-1" role="tablist" aria-label="Verification method">
+    {(['phone', 'email'] as const).map((option) => <button key={option} type="button" role="tab" aria-selected={channel === option} onClick={() => onChange(option)} className={`rounded-lg px-3 py-2 text-sm font-bold transition-colors ${channel === option ? 'bg-card text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>
+      {option === 'phone' ? 'Phone number' : 'Email address'}
+    </button>)}
+  </div>;
+}
+
+function LegacyMemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
   const [channel, setChannel] = useState<AuthChannel>('phone');
   const [identifier, setIdentifier] = useState('');
   const [otp, setOtp] = useState('');
@@ -241,14 +350,14 @@ function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
   const [message, setMessage] = useState('');
   const purpose = mode === 'signup' ? 'member_signup' : 'member_reset';
   const requestOtp = async () => {
-    const response = await fetch('/api/auth/member/request-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channel, identifier, purpose }) });
+    const response = await fetch('/api/auth/member/request-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: identifier, purpose }) });
     if (!response.ok) { setMessage(await responseError(response, 'Unable to send the verification code.')); return; }
     setStep('otp');
-    setMessage(`A verification code was sent to your ${channel === 'phone' ? 'mobile number' : 'email address'}.`);
+    setMessage('A verification code was sent to your mobile number.');
   };
   const verify = async (event: React.FormEvent) => {
     event.preventDefault();
-    const response = await fetch('/api/auth/member/verify-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channel, identifier, otp, purpose }) });
+    const response = await fetch('/api/auth/member/verify-otp', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: identifier, otp, purpose }) });
     if (!response.ok) { setMessage(await responseError(response, 'The verification code is invalid or expired.')); return; }
     const payload = (await response.json()) as { verificationToken: string };
     setVerificationToken(payload.verificationToken);
@@ -258,12 +367,141 @@ function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
   const setPasswordForMember = async (event: React.FormEvent) => {
     event.preventDefault();
     if (password !== confirmPassword) { setMessage('Passwords do not match.'); return; }
-    const response = await fetch('/api/auth/member/set-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ channel, identifier, password, verificationToken, purpose }) });
+    const response = await fetch('/api/auth/member/set-password', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ phone: identifier, password, verificationToken, purpose }) });
     setMessage(response.ok ? mode === 'signup' ? 'Account created. You can now sign in.' : 'Password updated. You can now sign in.' : await responseError(response, 'Unable to save the password.'));
     if (response.ok) setStep('identifier');
   };
   const title = mode === 'signup' ? 'Create member account' : 'Forgot password';
   return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><form onSubmit={step === 'identifier' ? (event) => { event.preventDefault(); void requestOtp(); } : step === 'otp' ? verify : setPasswordForMember} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p><h1 className="font-display text-3xl font-extrabold">{title}</h1><p className="text-sm text-muted-foreground">{step === 'identifier' ? 'Choose phone or email to receive a one-time verification code.' : step === 'otp' ? `Enter the six-digit code sent to your ${channel === 'phone' ? 'mobile number' : 'email address'}.` : 'Choose a password for future logins.'}</p>{step === 'identifier' && <><ChannelSelector channel={channel} onChange={setChannel} /><label className="block text-sm font-bold">{channel === 'phone' ? 'Mobile number' : 'Email address'}<input type={channel === 'phone' ? 'tel' : 'email'} inputMode={channel === 'phone' ? 'tel' : undefined} autoComplete={channel === 'phone' ? 'tel' : 'email'} required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder={channel === 'phone' ? '01XXXXXXXXX or +8801XXXXXXXXX' : 'you@example.com'} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label></>}{step === 'otp' && <label className="block text-sm font-bold">Verification code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}{step === 'password' && <><label className="block text-sm font-bold">New password<input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Confirm password<input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label></>}<Button type="submit">{step === 'identifier' ? 'Send OTP' : step === 'otp' ? 'Verify OTP' : mode === 'signup' ? 'Create account' : 'Save new password'}</Button>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/login" className="block text-sm font-bold text-accent-foreground underline">Return to member login</Link></form></div>;
+}
+
+function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
+  const [phone, setPhone] = useState('');
+  const [otp, setOtp] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [verificationToken, setVerificationToken] = useState('');
+  const [step, setStep] = useState<'phone' | 'otp' | 'password'>('phone');
+  const [message, setMessage] = useState('');
+  const [pending, setPending] = useState(false);
+  const purpose = mode === 'signup' ? 'member_signup' : 'member_reset';
+
+  const requestOtp = async () => {
+    setPending(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/auth/member/request-otp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ phone, purpose }),
+      });
+      if (!response.ok) {
+        setMessage(await responseError(response, 'Unable to send the verification code.'));
+        return;
+      }
+      setStep('otp');
+      setMessage('A verification code was sent to your mobile number.');
+    } catch {
+      setMessage('Unable to reach the account service. Please try again.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const verifyOtp = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setPending(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/auth/member/verify-otp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ phone, otp, purpose }),
+      });
+      if (!response.ok) {
+        setMessage(await responseError(response, 'The verification code is invalid or expired.'));
+        return;
+      }
+      const payload = (await response.json()) as { verificationToken: string };
+      setVerificationToken(payload.verificationToken);
+      setStep('password');
+    } catch {
+      setMessage('Unable to reach the account service. Please try again.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const savePassword = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (password !== confirmPassword) {
+      setMessage('Passwords do not match.');
+      return;
+    }
+    setPending(true);
+    setMessage('');
+    try {
+      const response = await fetch('/api/auth/member/set-password', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ phone, password, verificationToken, purpose }),
+      });
+      setMessage(response.ok
+        ? mode === 'signup' ? 'Account created. You can now sign in.' : 'Password updated. You can now sign in.'
+        : await responseError(response, 'Unable to save the password.'));
+      if (response.ok) {
+        setStep('phone');
+        setOtp('');
+        setPassword('');
+        setConfirmPassword('');
+        setVerificationToken('');
+      }
+    } catch {
+      setMessage('Unable to reach the account service. Please try again.');
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const title = mode === 'signup' ? 'Create member account' : 'Forgot password';
+  const submit = step === 'otp' ? verifyOtp : step === 'password' ? savePassword : (event: React.FormEvent) => {
+    event.preventDefault();
+    void requestOtp();
+  };
+
+  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6">
+    <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl">
+      <p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p>
+      <h1 className="font-display text-3xl font-extrabold">{title}</h1>
+      {mode === 'signup' && step === 'phone' && <>
+        <p className="text-sm text-muted-foreground">Create an account with Google or verify your mobile number.</p>
+        <GoogleSignInButton label="Sign up with Google" />
+        <div className="flex items-center gap-3 text-xs font-semibold text-muted-foreground"><span className="h-px flex-1 bg-border" /><span>OR USE YOUR PHONE</span><span className="h-px flex-1 bg-border" /></div>
+      </>}
+      {mode === 'reset' && step === 'phone' && <p className="text-sm text-muted-foreground">Enter the mobile number linked to your account to receive a reset code.</p>}
+      {step === 'otp' && <p className="text-sm text-muted-foreground">Enter the six-digit code sent to your mobile number.</p>}
+      {step === 'password' && <p className="text-sm text-muted-foreground">Choose a password for future phone sign-ins.</p>}
+      {step === 'phone' && <label className="block text-sm font-bold">Mobile number
+        <input type="tel" inputMode="tel" autoComplete="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="01XXXXXXXXX or +8801XXXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+      </label>}
+      {step === 'otp' && <label className="block text-sm font-bold">Verification code
+        <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+      </label>}
+      {step === 'password' && <>
+        <label className="block text-sm font-bold">New password
+          <input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <label className="block text-sm font-bold">Confirm password
+          <input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+      </>}
+      <Button type="submit" disabled={pending}>
+        {pending ? 'Please wait…' : step === 'phone' ? mode === 'signup' ? 'Send verification code' : 'Send reset code' : step === 'otp' ? 'Verify OTP' : mode === 'signup' ? 'Create account' : 'Save new password'}
+      </Button>
+      {message && <p role="status" className="rounded-xl bg-muted p-3 text-sm">{message}</p>}
+      <Link href="/login" className="block text-sm font-bold text-accent-foreground underline">Return to member login</Link>
+    </form>
+  </div>;
 }
 
 function Router() {
@@ -274,11 +512,15 @@ function Router() {
   const isMemberRoute = ['/dashboard', '/wishlist', '/my-books', '/requests', '/account', '/membership'].some((path) => location === path || location.startsWith(`${path}/`));
   const logout = async () => {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    if (isSupabaseBrowserConfigured()) {
+      await getSupabaseBrowserClient().auth.signOut({ scope: 'local' });
+    }
     await Promise.all([adminSession.refetch(), memberSession.refresh()]);
     queryClient.clear();
     setLocation('/');
   };
 
+  if (location === '/auth/callback') return <GoogleAuthCallbackPage />;
   if (location === '/admin/login') return <AdminLoginPage onAuthenticated={() => { void adminSession.refetch(); setLocation('/admin'); }} />;
   if (location === '/admin/setup') return <AdminSetupPage />;
   if (location === '/admin/reset-password') return <AdminSetupPage />;

@@ -10,16 +10,18 @@ This repository is a pnpm workspace with:
 
 The frontend and API can be served from one Vercel project. The database and external authentication/SMS services must be reachable from Vercel.
 
-## 1. Choose production services
+## 1. Prepare production services
 
 Before deploying, prepare:
 
-1. A hosted PostgreSQL database with a public or Vercel-reachable connection string.
-2. A Supabase project for the current password and OTP authentication implementation.
-3. An SMS provider compatible with the current `artifacts/api-server/src/services/sms.ts` implementation.
+1. A Supabase project for PostgreSQL, Auth, and Storage. Use its transaction pooler connection string for the serverless API.
+2. Google enabled under **Supabase → Authentication → Providers → Google**, with valid OAuth client credentials configured there.
+3. An SMS provider compatible with `artifacts/api-server/src/services/sms.ts`.
 4. A private Supabase Storage bucket for payment screenshots.
 
 Do not use the Replit development database hostname or Replit object-storage sidecar from Vercel. The application uses Supabase Storage when the direct Supabase variables are present and keeps the Replit sidecar only for local development.
+
+The browser uses Supabase Auth for Google OAuth. The API validates the returned Supabase access token and then issues the application's existing secure member-session cookie. The Google client secret stays in Supabase and must not be added to Vercel.
 
 ## 2. Import the repository into Vercel
 
@@ -48,6 +50,8 @@ Add these variables in the Vercel project under **Settings → Environment Varia
 DATABASE_URL
 SESSION_SECRET
 ```
+
+Set `DATABASE_URL` to the production Supabase Postgres transaction-pooler URL. Do not use the Replit database URL. Apply the production schema once using the instructions below; Vercel builds do not run database migrations.
 
 Use a separate production database connection string. Generate a new production-only session secret, for example:
 
@@ -81,6 +85,27 @@ SUPABASE_STORAGE_BUCKET=payment-screenshots
 `SUPABASE_SERVICE_ROLE_KEY` is server-only. Never prefix it with `VITE_` and never expose it in frontend code.
 
 Create a private bucket with the same name in Supabase Storage. The API uploads and serves payment screenshots through the server using the service-role key; the bucket is never public.
+
+### Browser Supabase Auth and Google redirect URLs
+
+These two values are public and are embedded in the frontend during its Vercel build:
+
+```text
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon-or-publishable-key>
+```
+
+Use the same Supabase project and public key as above. Never place `SUPABASE_SERVICE_ROLE_KEY` in a `VITE_` variable.
+
+In **Supabase → Authentication → URL Configuration**:
+
+1. Set the Site URL to the production app origin.
+2. Add `https://your-production-domain/auth/callback` to the allowed redirect URLs.
+3. Add each Vercel Preview callback URL that should support OAuth, plus `http://localhost:5173/auth/callback` for local development.
+
+In **Supabase → Authentication → Providers → Google**, enable Google and configure the OAuth client credentials. Copy the callback URL shown by Supabase into the authorized redirect URIs in the Google OAuth client. Supabase, not Vercel, stores the Google client secret.
+
+Member login and account creation support Google or phone number. Email is not a member authentication channel. Administrator access remains restricted to the configured phone allowlist.
 
 ### SMS verification
 
@@ -189,14 +214,16 @@ Expected results:
 Then test in the browser:
 
 1. Browse the homepage and book detail page.
-2. Create and sign in to a member account.
-3. Open membership status.
-4. Verify OTP delivery.
-5. Submit a payment with a unique TXID.
-6. Sign in to the Admin Portal using one of the two allowlisted numbers.
-7. Confirm an unlisted number and admin email login are rejected.
-8. Test payment screenshot upload with a private Supabase Storage bucket.
-9. Test borrowing approval, delivery scheduling, and notifications.
+2. Create a member account with Google, then sign out and sign in with Google again.
+3. Verify that a new Google member can reach the member dashboard without having a phone number.
+4. Create and sign in to a member account using phone OTP.
+5. Confirm that email-based member login and signup are unavailable.
+6. Open membership status and verify OTP delivery.
+7. Submit a payment with a unique TXID.
+8. Sign in to the Admin Portal using an allowlisted phone number.
+9. Confirm an unlisted number and admin email login are rejected.
+10. Test payment screenshot upload with a private Supabase Storage bucket.
+11. Test borrowing approval, delivery scheduling, and notifications.
 
 Check **Vercel → Deployments → Functions** logs if `/api/*` returns a 500.
 

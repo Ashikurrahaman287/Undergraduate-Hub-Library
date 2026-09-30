@@ -5,7 +5,7 @@
  * Undergraduate Hub library and book exchange API
  * OpenAPI spec version: 0.1.0
  */
-import type { ListBooksSort } from './listBooksSort';
+import type { ListBooksSort } from './listBooksSort.js';
 
 export type ListBooksParams = {
 search?: string;

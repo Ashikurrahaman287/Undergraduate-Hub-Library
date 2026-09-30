@@ -5,7 +5,7 @@
  * Undergraduate Hub library and book exchange API
  * OpenAPI spec version: 0.1.0
  */
-import type { AdminAuthSessionUser } from './adminAuthSessionUser';
+import type { AdminAuthSessionUser } from './adminAuthSessionUser.js';
 
 export interface AdminAuthSession {
   authenticated: boolean;
