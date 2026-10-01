@@ -240,10 +240,7 @@ router.post("/auth/logout", async (request, response, next) => {
 router.get("/auth/member/session", async (request, response, next) => {
   try {
     const member = await getAuthenticatedMember(request);
-    response.json({
-      authenticated: Boolean(member),
-      user: member ? { name: member.name, phone: member.phone } : null,
-    });
+    response.json(memberSessionResponse(member));
   } catch (error) {
     next(error);
   }

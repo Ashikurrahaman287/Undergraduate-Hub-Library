@@ -34,11 +34,12 @@ The browser uses Supabase Auth for Google OAuth. The API validates the returned 
 
 ```text
 Install Command: pnpm install --frozen-lockfile
-Build Command: pnpm --filter @workspace/undergraduate-hub run build
+Build Command: pnpm run typecheck && pnpm --filter @workspace/undergraduate-hub run build
 Output Directory: artifacts/undergraduate-hub/dist/public
 ```
 
 Do not set `artifacts/undergraduate-hub` as the Vercel root directory. The API function and shared workspace packages are at the repository root.
+The root typecheck validates the API server and frontend packages before Vite creates the production frontend artifact.
 
 ## 3. Add environment variables
 
@@ -81,7 +82,7 @@ The API uses Supabase's REST authentication endpoints when these variables are p
 
 ```text
 SUPABASE_URL=https://<project-ref>.supabase.co
-SUPABASE_ANON_KEY=<anon-or-publishable-key>
+SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 SUPABASE_SERVICE_ROLE_KEY=<service-role-key>
 SUPABASE_STORAGE_BUCKET=payment-screenshots
 ```
@@ -96,10 +97,10 @@ These two values are public and are embedded in the frontend during its Vercel b
 
 ```text
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
-VITE_SUPABASE_ANON_KEY=<anon-or-publishable-key>
+VITE_SUPABASE_PUBLISHABLE_KEY=<publishable-key>
 ```
 
-Use the same Supabase project and public key as above. Never place `SUPABASE_SERVICE_ROLE_KEY` in a `VITE_` variable.
+Use the same Supabase project and publishable key as above. Never place `SUPABASE_SERVICE_ROLE_KEY` in a `VITE_` variable. The current code still accepts `SUPABASE_ANON_KEY` and `VITE_SUPABASE_ANON_KEY` as legacy compatibility names.
 
 In **Supabase → Authentication → URL Configuration**:
 
@@ -109,7 +110,9 @@ In **Supabase → Authentication → URL Configuration**:
 
 In **Supabase → Authentication → Providers → Google**, enable Google and configure the OAuth client credentials. Copy the callback URL shown by Supabase into the authorized redirect URIs in the Google OAuth client. Supabase, not Vercel, stores the Google client secret.
 
-Member login, account creation, and OTP password recovery support Google, phone, or email. Administrator access requires the configured admin email and assigned admin role; existing phone-allowlisted admin identities remain supported.
+Member authentication supports phone OTP, email OTP, phone/password, email/password, and Google sign-in. Phone and email signup/reset flows verify a one-time code before setting a password.
+
+Admin authentication uses email and password with a Remember Session checkbox. First-time setup verifies the configured admin email with email OTP. Admin forgot-password sends a recovery link to the configured admin email, and `/admin/reset-password` accepts that link to set a new password. The server requires both the configured admin identity and an assigned admin role. The configured phone allowlist remains available for existing phone-based admin identities.
 
 ### SMS verification
 
@@ -221,11 +224,11 @@ Then test in the browser:
 2. Create a member account with Google, then sign out and sign in with Google again.
 3. Verify that a new Google member can reach the member dashboard without having a phone number.
 4. Create and sign in to a member account using phone OTP.
-5. Confirm that email-based member login and signup are unavailable.
+5. Confirm that email OTP, email/password sign-in, and email-based signup/reset work.
 6. Open membership status and verify OTP delivery.
 7. Submit a payment with a unique TXID.
-8. Sign in to the Admin Portal using an allowlisted phone number.
-9. Confirm an unlisted number and admin email login are rejected.
+8. Sign in to the Admin Portal with the configured admin email and password, and verify Remember Session.
+9. Test admin email OTP setup, forgot-password, and reset-password.
 10. Test payment screenshot upload with a private Supabase Storage bucket.
 11. Test borrowing approval, delivery scheduling, and notifications.
 

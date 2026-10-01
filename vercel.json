@@ -1,7 +1,7 @@
 {
   "version": 2,
   "installCommand": "pnpm install --frozen-lockfile",
-  "buildCommand": "pnpm --filter @workspace/undergraduate-hub run build",
+  "buildCommand": "pnpm run typecheck && pnpm --filter @workspace/undergraduate-hub run build",
   "outputDirectory": "artifacts/undergraduate-hub/dist/public",
   "rewrites": [
     {

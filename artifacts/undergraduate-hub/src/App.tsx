@@ -76,16 +76,11 @@ import { AdminMembershipPage, MemberMembershipPage, MembershipStagePreview } fro
 import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation, useParams } from 'wouter';
 
 const queryClient = new QueryClient();
+const fallbackBooks: Book[] = [];
 
-const fallbackBooks: Book[] = import.meta.env.DEV ? [
-  { id: 'b1', title: 'Principles of Economics', author: 'N. Gregory Mankiw', category: 'Economics', language: 'English', coverUrl: null, qrCode: 'UH-B1', isbn: '9781305585126', price: 780, status: 'available', conditionNote: 'Good condition', depositRequired: true, depositAmount: 300, createdAt: '', updatedAt: '' },
-  { id: 'b2', title: 'বাংলা ভাষা ও সাহিত্য', author: 'হুমায়ুন আজাদ', category: 'Language', language: 'Bangla', coverUrl: null, qrCode: 'UH-B2', isbn: null, price: 420, status: 'available', conditionNote: 'Marked pages', depositRequired: false, depositAmount: 0, createdAt: '', updatedAt: '' },
-  { id: 'b3', title: 'Introduction to Algorithms', author: 'Cormen, Leiserson, Rivest', category: 'Computer Science', language: 'English', coverUrl: null, qrCode: 'UH-B3', isbn: '9780262033848', price: 1400, status: 'rented', conditionNote: 'Clean copy', depositRequired: true, depositAmount: 500, createdAt: '', updatedAt: '' },
-  { id: 'b4', title: 'The Architecture of Bangladesh', author: 'M. A. Muktadir', category: 'Architecture', language: 'English', coverUrl: null, qrCode: 'UH-B4', isbn: null, price: 950, status: 'available', conditionNote: 'Like new', depositRequired: true, depositAmount: 350, createdAt: '', updatedAt: '' },
-] : [];
 type MemberSession = {
   authenticated: boolean;
-  user: { name: string; phone: string } | null;
+  user: { name: string; phone: string | null; email: string | null } | null;
 };
 
 const emptyDashboard: Dashboard = {
@@ -262,26 +257,6 @@ function GoogleAuthCallbackPage() {
       {message !== 'Completing Google sign-in…' && <Link href="/login" className="inline-block text-sm font-bold text-accent-foreground underline">Return to sign in</Link>}
     </div>
   </div>;
-}
-
-function AdminLoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
-  const [pending, setPending] = useState(false);
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    setPending(true);
-    const response = await fetch('/api/auth/admin/login', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      credentials: 'include',
-      body: JSON.stringify({ channel: 'phone', identifier, password, rememberSession: true }),
-    });
-    setPending(false);
-    if (response.ok) onAuthenticated(); else setMessage(await responseError(response, 'Invalid administrator credentials.'));
-  };
-  return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p><h1 className="font-display text-3xl font-extrabold">Admin Portal</h1><p className="text-sm text-muted-foreground">Only the configured administrator mobile numbers can access this portal.</p><label className="block text-sm font-bold">Administrator mobile number<input type="tel" inputMode="tel" autoComplete="tel" required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="01XXXXXXXXX or +8801XXXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Password<input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit" disabled={pending}>{pending ? 'Signing in…' : 'Login'}</Button><Link href="/admin/setup" className="block text-sm font-bold text-accent-foreground underline">First-time administrator setup</Link>{message && <p className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{message}</p>}</form></div>;
 }
 
 function AdminSetupPage() {
@@ -629,17 +604,6 @@ function AdminEmailLoginPage({ onAuthenticated }: { onAuthenticated: () => void 
     </div>;
   }
 
-  function MemberLoginPage({ onAuthenticated }: { onAuthenticated?: () => void }) {
-  const [identifier, setIdentifier] = useState('');
-  const [password, setPassword] = useState('');
-  const [message, setMessage] = useState('');
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    const response = await fetch('/api/auth/member/login', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'include', body: JSON.stringify({ phone: identifier, password }) });
-    if (response.ok) onAuthenticated?.(); else setMessage(await responseError(response, 'Invalid contact or password.'));
-  };
-  return <div className="grid min-h-[100dvh] place-items-center bg-background p-6"><form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl"><h1 className="font-display text-3xl font-extrabold">Member sign in</h1><p className="text-sm text-muted-foreground">Sign in with Google or use your mobile number and password.</p><GoogleSignInButton label="Continue with Google" /><div className="flex items-center gap-3 text-xs font-semibold text-muted-foreground"><span className="h-px flex-1 bg-border" /><span>OR USE YOUR PHONE</span><span className="h-px flex-1 bg-border" /></div><label className="block text-sm font-bold">Mobile number<input type="tel" inputMode="tel" autoComplete="tel" required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="01XXXXXXXXX or +8801XXXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Password<input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><Button type="submit">Login with phone</Button><div className="flex flex-wrap justify-between gap-3 text-sm font-bold"><Link href="/create-account" className="text-accent-foreground underline">Create account</Link><Link href="/forgot-password" className="text-accent-foreground underline">Forgot password?</Link></div>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/" className="block text-sm font-bold text-accent-foreground underline">Continue browsing books</Link></form></div>;
-}
 
 type AuthChannel = 'phone' | 'email';
 
@@ -884,7 +848,7 @@ function Router() {
   </Switch></Shell>;
 }
 
-function Shell({ children, adminMode = false, adminUser, memberUser, onLogout }: { children: ReactNode; adminMode?: boolean; adminUser?: { email: string; name: string; role: string } | null; memberUser?: { name: string; phone: string } | null; onLogout: () => void }) {
+function Shell({ children, adminMode = false, adminUser, memberUser, onLogout }: { children: ReactNode; adminMode?: boolean; adminUser?: { email: string; name: string; role: string } | null; memberUser?: { name: string; phone: string | null; email: string | null } | null; onLogout: () => void }) {
   const [mobileNav, setMobileNav] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const today = new Intl.DateTimeFormat('en-GB', {
@@ -968,7 +932,7 @@ function HomePage() {
   const featuredQuery = useListBooks({ page: 1, pageSize: 4, sort: 'popular' });
   const recentQuery = useListBooks({ page: 1, pageSize: 4, sort: 'recent' });
   const books = query.data ?? [];
-  const categories = [...new Set([...fallbackBooks.map((book) => book.category), ...books.map((book) => book.category)])];
+  const categories = [...new Set(books.map((book) => book.category))];
   return <><section className="relative overflow-hidden rounded-3xl bg-primary px-6 py-8 text-primary-foreground shadow-[0_16px_36px_hsl(187_35%_16%/.14)] sm:px-10 sm:py-12"><div className="absolute -right-20 -top-24 size-72 rounded-full bg-accent/20 blur-3xl" /><div className="relative max-w-3xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub · Dhaka</p><h1 className="mt-3 max-w-2xl font-display text-3xl font-extrabold tracking-tight sm:text-5xl">আপনার পরের ভালো বইটি খুঁজে নিন।</h1><p className="mt-4 max-w-xl text-sm leading-relaxed text-primary-foreground/70 sm:text-base">১২শ’র বেশি বই থেকে বিষয়, ভাষা, অথবা লেখকের নামে খুঁজুন। পছন্দের বই wishlist-এ রাখুন, তারপর pickup slot বেছে নিন।</p><label className="relative mt-7 block max-w-2xl"><Search className="absolute left-4 top-1/2 -translate-y-1/2 text-primary-foreground/50" size={19} /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="বই, লেখক বা বিষয় খুঁজুন..." className="h-14 w-full rounded-2xl border border-primary-foreground/10 bg-primary-foreground/10 pl-12 pr-4 text-sm text-primary-foreground outline-none placeholder:text-primary-foreground/50 focus:ring-2 focus:ring-accent" data-testid="input-home-search" /></label></div></section><section className="mt-6 rounded-2xl border border-border bg-card p-4"><div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"><div className="flex flex-wrap gap-2">{['all', ...categories].map((item) => <button key={item} onClick={() => { setCategory(item); setPage(1); }} className={`rounded-full px-3 py-2 text-xs font-bold transition-colors ${category === item ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground hover:text-foreground'}`} data-testid={`filter-category-${item}`}>{item === 'all' ? 'All categories' : item}</button>)}</div><div className="flex flex-wrap gap-2"><select value={language} onChange={(event) => { setLanguage(event.target.value); setPage(1); }} className="h-10 rounded-xl border border-border bg-background px-3 text-xs font-bold" data-testid="select-home-language"><option value="all">All languages</option><option value="English">English</option><option value="Bangla">Bangla</option></select><select value={status} onChange={(event) => { setStatus(event.target.value); setPage(1); }} className="h-10 rounded-xl border border-border bg-background px-3 text-xs font-bold" data-testid="select-home-availability"><option value="available">Available only</option><option value="all">All books</option><option value="rented">Rented</option><option value="lost">Lost</option></select></div></div></section>{!search && category === 'all' && language === 'all' && <div className="mt-8 space-y-8"><BookSection title="Featured books" eyebrow="Curated for you" books={featuredQuery.data ?? fallbackBooks.slice(0, 4)} /><BookSection title="Recently added" eyebrow="Fresh on the shelf" books={recentQuery.data ?? fallbackBooks.slice(0, 4).reverse()} /></div>}<section className="mt-8"><div className="mb-4 flex items-end justify-between gap-3"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">Open shelf</p><h2 className="mt-1 font-display text-2xl font-extrabold">{search || category !== 'all' || language !== 'all' ? 'Search results' : 'Popular books'}</h2></div><span className="text-xs text-muted-foreground">Page {page} · up to 24 books</span></div>{query.isLoading ? <LoadingBlock rows={6} /> : query.isError ? <ErrorNotice onRetry={() => query.refetch()} /> : books.length === 0 ? <EmptyState title="এই খোঁজে কোনো বই নেই" body="অন্য শব্দ, ভাষা, অথবা category দিয়ে আবার চেষ্টা করুন।" /> : <><div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{books.map((book, index) => <BookCard key={book.id} book={book} accent={index} />)}</div><div className="mt-6 flex items-center justify-between"><Button variant="outline" onClick={() => setPage((value) => Math.max(1, value - 1))} disabled={page === 1} testId="button-home-previous"><ChevronLeft size={16} /> Previous</Button><Button variant="outline" onClick={() => setPage((value) => value + 1)} disabled={books.length < 24 || query.isFetching} testId="button-home-next">Next <ChevronRight size={16} /></Button></div></>}</section></>;
 }
 
@@ -985,7 +949,7 @@ function MemberDashboard() {
 function BooksPage() {
   const [search, setSearch] = useState(''); const [category, setCategory] = useState('all'); const [language, setLanguage] = useState('all'); const [status, setStatus] = useState('available');
   const params = useMemo(() => ({ search: search || undefined, category: category === 'all' ? undefined : category, language: language === 'all' ? undefined : language, status: status === 'all' ? undefined : status }), [search, category, language, status]);
-  const query = useListBooks(params); const books = query.data || fallbackBooks; const categories = [...new Set([...fallbackBooks, ...(query.data ?? [])].map((book) => book.category))];
+  const query = useListBooks(params); const books = query.data ?? []; const categories = [...new Set(books.map((book) => book.category))];
   return <><PageIntro eyebrow="The open shelf" title="Find your next useful book." description="বিষয়, ভাষা অথবা লেখকের নামে খুঁজুন। বই পছন্দ হলে সংগ্রহের সময় বেছে অনুরোধ পাঠান।" /><div className="mb-6 rounded-2xl border border-border bg-card p-3 shadow-sm"><div className="flex flex-col gap-3 lg:flex-row"><label className="relative flex-1"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" size={18} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="বই, লেখক, ISBN বা বিষয় খুঁজুন..." className="h-11 w-full rounded-xl border-0 bg-muted/70 pl-10 pr-4 text-sm outline-none ring-accent transition focus:ring-2" data-testid="input-book-search" /></label><div className="flex flex-wrap gap-2"><select value={category} onChange={(e) => setCategory(e.target.value)} className="h-11 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-accent" data-testid="select-book-category"><option value="all">All categories</option>{categories.map((item) => <option key={item} value={item}>{item}</option>)}</select><select value={language} onChange={(e) => setLanguage(e.target.value)} className="h-11 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-accent" data-testid="select-book-language"><option value="all">All languages</option><option value="English">English</option><option value="Bangla">Bangla</option></select><select value={status} onChange={(e) => setStatus(e.target.value)} className="h-11 rounded-xl border border-border bg-background px-3 text-sm outline-none focus:ring-2 focus:ring-accent" data-testid="select-book-status"><option value="available">Available now</option><option value="all">All stock</option><option value="rented">Borrowed</option><option value="lost">Lost</option></select></div></div></div>{query.isLoading ? <LoadingBlock rows={5} /> : query.isError ? <ErrorNotice onRetry={() => query.refetch()} /> : books.length === 0 ? <EmptyState title="এই খোঁজে কোনো বই নেই" body="অন্য শব্দ বা বিষয় দিয়ে আবার চেষ্টা করুন।" action={<Button variant="outline" onClick={() => { setSearch(''); setCategory('all'); setLanguage('all'); setStatus('available'); }} testId="button-clear-filters"><RefreshCw size={15} /> Filters clear করুন</Button>} /> : <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">{books.map((book, i) => <BookCard key={book.id} book={book} accent={i % 4} />)}</div>}</>;
 }
 
@@ -1014,7 +978,7 @@ function BookCard({ book, accent }: { book: Book; accent: number }) {
 function BookDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   const query = useGetBook(id, { query: { enabled: !!id, queryKey: getGetBookQueryKey(id) } });
-  const book = query.data || fallbackBooks.find((item) => item.id === id) || fallbackBooks[0];
+  const book = query.data;
   const [showForm, setShowForm] = useState(false);
   const [date, setDate] = useState(() => {
     const pickupDate = new Date();
@@ -1063,7 +1027,7 @@ function AdminDashboard() {
 function HealthRow({ label, value, total, color }: { label: string; value: number; total: number; color: string }) { const pct = Math.min(100, Math.round((value / total) * 100)); return <div><div className="mb-2 flex justify-between text-xs"><span className="font-semibold">{label}</span><span className="text-muted-foreground">{value.toLocaleString()} · {pct}%</span></div><div className="h-2 overflow-hidden rounded-full bg-muted"><div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} /></div></div>; }
 
 function InventoryPage() {
-  const query = useListBooks(); const books = query.data || fallbackBooks; const create = useCreateBook(); const update = useUpdateBook(); const client = useQueryClient(); const [addOpen, setAddOpen] = useState(false); const [editing, setEditing] = useState<string | null>(null); const [title, setTitle] = useState(''); const [author, setAuthor] = useState(''); const [category, setCategory] = useState('Economics'); const [language, setLanguage] = useState('English'); const [depositAmount, setDepositAmount] = useState('300'); const { toast } = useToast();
+  const query = useListBooks(); const books = query.data ?? []; const create = useCreateBook(); const update = useUpdateBook(); const client = useQueryClient(); const [addOpen, setAddOpen] = useState(false); const [editing, setEditing] = useState<string | null>(null); const [title, setTitle] = useState(''); const [author, setAuthor] = useState(''); const [category, setCategory] = useState('Economics'); const [language, setLanguage] = useState('English'); const [depositAmount, setDepositAmount] = useState('300'); const { toast } = useToast();
   const reset = () => { setTitle(''); setAuthor(''); setCategory('Economics'); setLanguage('English'); setDepositAmount('300'); setEditing(null); setAddOpen(false); };
   const submit = () => { if (!title || !author) return; if (editing) update.mutate({ id: editing, data: { title, author, category, language, depositAmount: Number(depositAmount), depositRequired: Number(depositAmount) > 0 } }, { onSuccess: () => { client.invalidateQueries({ queryKey: getListBooksQueryKey() }); reset(); toast({ title: 'বই আপডেট হয়েছে' }); } }); else create.mutate({ data: { title, author, category, language, depositAmount: Number(depositAmount), depositRequired: Number(depositAmount) > 0, coverUrl: null, isbn: null, price: 0, conditionNote: 'Good condition' } }, { onSuccess: () => { client.invalidateQueries({ queryKey: getListBooksQueryKey() }); reset(); toast({ title: 'নতুন বই যোগ হয়েছে' }); } }); };
   const startEdit = (book: Book) => { setEditing(book.id); setTitle(book.title); setAuthor(book.author); setCategory(book.category); setLanguage(book.language); setDepositAmount(String(book.depositAmount)); setAddOpen(true); };

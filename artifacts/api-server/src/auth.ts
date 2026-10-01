@@ -62,7 +62,8 @@ type AdminRequest = Request & { admin?: AdminIdentity };
 export type MemberIdentity = {
   userId: string;
   memberId: string;
-  phone: string;
+  phone: string | null;
+  email: string | null;
   name: string;
 };
 type MemberRequest = Request & { member?: MemberIdentity };
@@ -246,7 +247,13 @@ async function findMemberByUserId(userId: string): Promise<MemberIdentity | null
     .where(eq(membersTable.authUserId, userId))
     .limit(1);
   if (!member || member.status === "suspended") return null;
-  return { userId, memberId: member.id, phone: member.phone ?? "", name: member.name };
+  return {
+    userId,
+    memberId: member.id,
+    phone: member.phone,
+    email: member.email,
+    name: member.name,
+  };
 }
 
 export async function getAuthenticatedAdmin(request: Request) {
@@ -436,7 +443,7 @@ export function memberSessionResponse(identity: MemberIdentity | null) {
   return identity
     ? {
         authenticated: true,
-        user: { name: identity.name, phone: identity.phone },
+        user: { name: identity.name, phone: identity.phone, email: identity.email },
       }
     : { authenticated: false, user: null };
 }
