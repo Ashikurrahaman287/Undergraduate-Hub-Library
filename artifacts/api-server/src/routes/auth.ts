@@ -15,33 +15,37 @@ import {
   requestAdminEmailOtp,
   requestMemberOtp,
   requestAdminPasswordReset,
+  requestMemberEmailOtp,
   revokeAdminSession,
   revokeMemberSession,
   setAdminSessionCookie,
   setMemberSessionCookie,
   setAdminPassword,
   setMemberPassword,
+  normalizeEmail,
   updateAdminPassword,
   verifyOtp,
   verifyEmailOtp,
   verifyMemberOtp,
+  verifyMemberEmailOtp,
 } from "../auth.js";
 
 const router: IRouter = Router();
 
-function memberPhoneFromBody(body: unknown) {
+function memberIdentifierFromBody(body: unknown) {
   if (!body || typeof body !== "object") return null;
   const value = body as Record<string, unknown>;
-  if (value.channel === "email" || typeof value.email === "string") return null;
-  const phone =
-    typeof value.phone === "string"
-      ? value.phone
-      : typeof value.identifier === "string"
-        ? value.identifier
-        : null;
-  if (!phone) return null;
+  const channel = value.channel === "email" || typeof value.email === "string" ? "email" : "phone";
+  const identifier = typeof value.identifier === "string"
+    ? value.identifier
+    : channel === "email"
+      ? value.email
+      : value.phone;
+  if (typeof identifier !== "string") return null;
   try {
-    return normalizeBangladeshiPhone(phone);
+    return channel === "email"
+      ? { channel, identifier: normalizeEmail(identifier) }
+      : { channel, identifier: normalizeBangladeshiPhone(identifier) };
   } catch {
     return null;
   }
@@ -247,19 +251,19 @@ router.get("/auth/member/session", async (request, response, next) => {
 
 router.post("/auth/member/login", async (request, response, next) => {
   try {
-    const phone = memberPhoneFromBody(request.body);
-    if (!phone) {
-      response.status(400).json({ error: "Enter a valid mobile number or sign in with Google." });
+    const credential = memberIdentifierFromBody(request.body);
+    if (!credential) {
+      response.status(400).json({ error: "Enter a valid email or mobile number, or sign in with Google." });
       return;
     }
     const password = typeof request.body?.password === "string" ? request.body.password : "";
-    const result = await loginMember(phone, password, "phone");
+    const result = await loginMember(credential.identifier, password, credential.channel);
     if (result.kind === "not_configured") {
       response.status(503).json({ error: "Member authentication is not configured." });
       return;
     }
     if (result.kind !== "authenticated") {
-      response.status(401).json({ error: "Invalid mobile number or password." });
+      response.status(401).json({ error: "Invalid email or mobile number or password." });
       return;
     }
     setMemberSessionCookie(response, result.session.token, result.session.expiresAt);
@@ -298,14 +302,16 @@ router.post("/auth/member/google", async (request, response, next) => {
 
 router.post("/auth/member/request-otp", async (request, response, next) => {
   try {
-    const phone = memberPhoneFromBody(request.body);
-    if (!phone) {
-      response.status(400).json({ error: "Enter a valid mobile number to receive a verification code." });
+    const credential = memberIdentifierFromBody(request.body);
+    if (!credential) {
+      response.status(400).json({ error: "Enter a valid email or mobile number to receive a verification code." });
       return;
     }
     const purpose =
       request.body?.purpose === "member_reset" ? ("member_reset" as const) : ("member_signup" as const);
-    const result = await requestMemberOtp(phone, purpose, request.ip);
+    const result = credential.channel === "email"
+      ? await requestMemberEmailOtp(credential.identifier, purpose, request.ip)
+      : await requestMemberOtp(credential.identifier, purpose, request.ip);
     if (result.kind === "not_configured") {
       response.status(503).json({ error: "Member verification is not configured." });
       return;
@@ -326,15 +332,17 @@ router.post("/auth/member/request-otp", async (request, response, next) => {
 
 router.post("/auth/member/verify-otp", async (request, response, next) => {
   try {
-    const phone = memberPhoneFromBody(request.body);
-    if (!phone) {
-      response.status(400).json({ error: "Enter a valid mobile number for this verification code." });
+    const credential = memberIdentifierFromBody(request.body);
+    if (!credential) {
+      response.status(400).json({ error: "Enter a valid email or mobile number for this verification code." });
       return;
     }
     const otp = typeof request.body?.otp === "string" ? request.body.otp : "";
     const purpose =
       request.body?.purpose === "member_reset" ? ("member_reset" as const) : ("member_signup" as const);
-    const result = await verifyMemberOtp(phone, otp, purpose);
+    const result = credential.channel === "email"
+      ? await verifyMemberEmailOtp(credential.identifier, otp, purpose)
+      : await verifyMemberOtp(credential.identifier, otp, purpose);
     if (result.kind !== "verified") {
       response.status(401).json({ error: "The verification code is invalid or expired." });
       return;
@@ -347,9 +355,9 @@ router.post("/auth/member/verify-otp", async (request, response, next) => {
 
 router.post("/auth/member/set-password", async (request, response, next) => {
   try {
-    const phone = memberPhoneFromBody(request.body);
-    if (!phone) {
-      response.status(400).json({ error: "A valid mobile number is required." });
+    const credential = memberIdentifierFromBody(request.body);
+    if (!credential) {
+      response.status(400).json({ error: "A valid email or mobile number is required." });
       return;
     }
     const password = typeof request.body?.password === "string" ? request.body.password : "";
@@ -357,7 +365,7 @@ router.post("/auth/member/set-password", async (request, response, next) => {
       typeof request.body?.verificationToken === "string" ? request.body.verificationToken : "";
     const purpose =
       request.body?.purpose === "member_reset" ? ("member_reset" as const) : ("member_signup" as const);
-    const result = await setMemberPassword(phone, password, verificationToken, purpose, "phone");
+    const result = await setMemberPassword(credential.identifier, password, verificationToken, purpose, credential.channel);
     if (result.kind === "invalid_password") {
       response.status(400).json({ error: "Password must be at least 8 characters." });
       return;

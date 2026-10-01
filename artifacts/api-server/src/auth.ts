@@ -176,6 +176,15 @@ export function normalizeEmail(value: string) {
   return email;
 }
 
+function isConfiguredAdminEmail(value: string | null | undefined) {
+  if (!value) return false;
+  try {
+    return normalizeEmail(value) === configuredAdminEmail();
+  } catch {
+    return false;
+  }
+}
+
 function phoneAliasEmail(phone: string) {
   return `${phone.replace(/\D/g, "")}@phone.undergraduatehub.local`;
 }
@@ -210,7 +219,7 @@ async function findAdminByUserId(userId: string): Promise<AdminIdentity | null> 
     .where(eq(membersTable.authUserId, userId))
     .limit(1);
   if (!member) return null;
-  if (!isConfiguredAdminPhone(member.phone)) return null;
+  if (!isConfiguredAdminPhone(member.phone) && !isConfiguredAdminEmail(member.email)) return null;
 
   const [assignment] = await db
     .select({ role: userRolesTable.role })
@@ -503,12 +512,19 @@ async function supabaseRequest(
 
 export async function requestAdminPasswordReset(email: string) {
   if (!hasSupabaseAuthAccess()) return { kind: "not_configured" as const };
+  let normalizedEmail: string;
+  try {
+    normalizedEmail = normalizeEmail(email);
+  } catch {
+    return { kind: "accepted" as const };
+  }
+  if (!isConfiguredAdminEmail(normalizedEmail)) return { kind: "accepted" as const };
 
   const redirectTo = process.env.ADMIN_PASSWORD_RESET_REDIRECT_URL;
   const response = await supabaseRequest("/auth/v1/recover", {
     method: "POST",
     body: JSON.stringify({
-      email: email.trim().toLowerCase(),
+      email: normalizedEmail,
       ...(redirectTo ? { redirect_to: redirectTo } : {}),
     }),
   }, "anon");
@@ -520,6 +536,16 @@ export async function requestAdminPasswordReset(email: string) {
 
 export async function updateAdminPassword(accessToken: string, password: string) {
   if (!hasSupabaseAuthAccess()) return { kind: "not_configured" as const };
+
+  const userResponse = await supabaseRequest("/auth/v1/user", {
+    method: "GET",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  }, "anon");
+  if (!userResponse.ok) return { kind: "invalid_or_expired_token" as const };
+  const user = (await userResponse.json()) as { id?: string; email?: string };
+  if (!user.id || !isConfiguredAdminEmail(user.email) || !(await findAdminByUserId(user.id))) {
+    return { kind: "invalid_or_expired_token" as const };
+  }
 
   const response = await supabaseRequest("/auth/v1/user", {
     method: "PUT",
@@ -664,9 +690,13 @@ export async function authenticateAdminWithCredential(
   password: string,
   channel: VerificationChannel,
 ) {
-  if (channel !== "phone") return { kind: "not_authorized" as const };
-  const normalizedIdentifier = normalizeBangladeshiPhone(identifier);
-  if (!isConfiguredAdminPhone(normalizedIdentifier)) return { kind: "not_authorized" as const };
+  const normalizedIdentifier = channel === "phone"
+    ? normalizeBangladeshiPhone(identifier)
+    : normalizeEmail(identifier);
+  const authorized = channel === "phone"
+    ? isConfiguredAdminPhone(normalizedIdentifier)
+    : isConfiguredAdminEmail(normalizedIdentifier);
+  if (!authorized) return { kind: "not_authorized" as const };
   const result = await authenticateSupabaseCredential(channel, normalizedIdentifier, password);
   if (result.kind !== "authenticated") return result;
   const identity = await findAdminByUserId(result.userId);
@@ -686,7 +716,9 @@ async function requestOtpChallenge(
 ) {
   const normalizedIdentifier =
     channel === "phone" ? normalizeBangladeshiPhone(identifier) : normalizeEmail(identifier);
-  if (purpose === "admin_setup" && !isConfiguredAdminPhone(normalizedIdentifier)) {
+  if (purpose === "admin_setup" && !(channel === "phone"
+    ? isConfiguredAdminPhone(normalizedIdentifier)
+    : isConfiguredAdminEmail(normalizedIdentifier))) {
     return { kind: "not_available" as const };
   }
   if (!process.env.SESSION_SECRET || !hasSupabaseServiceAccess() || !process.env.SMS_API_KEY) {
@@ -768,7 +800,9 @@ async function requestEmailOtp(
   requestIp?: string | null,
 ) {
   const normalizedEmail = normalizeEmail(email);
-  if (purpose === "admin_setup") return { kind: "not_available" as const };
+  if (purpose === "admin_setup" && !isConfiguredAdminEmail(normalizedEmail)) {
+    return { kind: "not_available" as const };
+  }
   if (!process.env.SESSION_SECRET || !hasSupabaseAuthAccess()) {
     return { kind: "not_configured" as const };
   }
@@ -859,9 +893,7 @@ export async function requestAdminOtp(phone: string, requestIp?: string | null) 
 }
 
 export async function requestAdminEmailOtp(email: string, requestIp?: string | null) {
-  void email;
-  void requestIp;
-  return { kind: "not_available" as const };
+  return requestEmailOtp(email, "admin_setup", requestIp);
 }
 
 async function createVerification(challenge: typeof otpChallengesTable.$inferSelect) {
@@ -909,7 +941,9 @@ export async function verifyOtp(phone: string, otp: string, purpose: OtpPurpose)
 
 export async function verifyEmailOtp(email: string, otp: string, purpose: OtpPurpose) {
   const normalizedEmail = normalizeEmail(email);
-  if (purpose === "admin_setup") return { kind: "invalid" as const };
+  if (purpose === "admin_setup" && !isConfiguredAdminEmail(normalizedEmail)) {
+    return { kind: "invalid" as const };
+  }
   if (!/^\d{6}$/.test(otp)) return { kind: "invalid" as const };
   const [challenge] = await db
     .select()
@@ -1043,22 +1077,27 @@ export async function setAdminPassword(
   channel: VerificationChannel = "phone",
 ) {
   if (password.length < 8) return { kind: "invalid_password" as const };
-  if (channel !== "phone") return { kind: "invalid_verification" as const };
   const normalizedIdentifier = await consumeVerification(channel, identifier, "admin_setup", verificationToken);
-  if (!normalizedIdentifier || !isConfiguredAdminPhone(normalizedIdentifier)) {
+  const authorized = normalizedIdentifier && (channel === "phone"
+    ? isConfiguredAdminPhone(normalizedIdentifier)
+    : isConfiguredAdminEmail(normalizedIdentifier));
+  if (!normalizedIdentifier || !authorized) {
     return { kind: "invalid_verification" as const };
   }
   const { userId } = await ensureSupabaseCredentialUser(channel, normalizedIdentifier, password);
+  const memberMatch = channel === "phone"
+    ? eq(membersTable.phone, normalizedIdentifier)
+    : eq(membersTable.email, normalizedIdentifier);
   let [member] = await db
     .select()
     .from(membersTable)
-    .where(eq(membersTable.phone, normalizedIdentifier))
+    .where(memberMatch)
     .limit(1);
   if (!member) {
     [member] = await db.insert(membersTable).values({
       authUserId: userId,
       name: "Undergraduate Hub administrator",
-      phone: normalizedIdentifier,
+      ...(channel === "phone" ? { phone: normalizedIdentifier } : { email: normalizedIdentifier }),
       university: "Undergraduate Hub",
       role: "admin",
     }).returning();

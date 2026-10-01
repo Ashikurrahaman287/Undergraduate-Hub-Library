@@ -77,12 +77,12 @@ import { Link, Redirect, Route, Switch, Router as WouterRouter, useLocation, use
 
 const queryClient = new QueryClient();
 
-const fallbackBooks: Book[] = [
+const fallbackBooks: Book[] = import.meta.env.DEV ? [
   { id: 'b1', title: 'Principles of Economics', author: 'N. Gregory Mankiw', category: 'Economics', language: 'English', coverUrl: null, qrCode: 'UH-B1', isbn: '9781305585126', price: 780, status: 'available', conditionNote: 'Good condition', depositRequired: true, depositAmount: 300, createdAt: '', updatedAt: '' },
   { id: 'b2', title: 'বাংলা ভাষা ও সাহিত্য', author: 'হুমায়ুন আজাদ', category: 'Language', language: 'Bangla', coverUrl: null, qrCode: 'UH-B2', isbn: null, price: 420, status: 'available', conditionNote: 'Marked pages', depositRequired: false, depositAmount: 0, createdAt: '', updatedAt: '' },
   { id: 'b3', title: 'Introduction to Algorithms', author: 'Cormen, Leiserson, Rivest', category: 'Computer Science', language: 'English', coverUrl: null, qrCode: 'UH-B3', isbn: '9780262033848', price: 1400, status: 'rented', conditionNote: 'Clean copy', depositRequired: true, depositAmount: 500, createdAt: '', updatedAt: '' },
   { id: 'b4', title: 'The Architecture of Bangladesh', author: 'M. A. Muktadir', category: 'Architecture', language: 'English', coverUrl: null, qrCode: 'UH-B4', isbn: null, price: 950, status: 'available', conditionNote: 'Like new', depositRequired: true, depositAmount: 350, createdAt: '', updatedAt: '' },
-];
+] : [];
 type MemberSession = {
   authenticated: boolean;
   user: { name: string; phone: string } | null;
@@ -317,7 +317,319 @@ function AdminSetupPage() {
   return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6"><form onSubmit={step === 'identifier' ? (event) => { event.preventDefault(); void requestOtp(); } : step === 'otp' ? verify : setAdminPassword} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl"><p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p><h1 className="font-display text-3xl font-extrabold">Administrator setup</h1><p className="text-sm text-muted-foreground">{step === 'identifier' ? 'Verify one of the configured administrator mobile numbers.' : step === 'otp' ? 'Enter the six-digit code sent to the administrator mobile number.' : 'Choose a password for future administrator logins.'}</p>{step === 'identifier' && <label className="block text-sm font-bold">Administrator mobile number<input type="tel" inputMode="tel" autoComplete="tel" required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder="01XXXXXXXXX or +8801XXXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}{step === 'otp' && <label className="block text-sm font-bold">Verification code<input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label>}{step === 'password' && <><label className="block text-sm font-bold">New password<input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label><label className="block text-sm font-bold">Confirm password<input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" /></label></>}<Button type="submit">{step === 'identifier' ? 'Send OTP' : step === 'otp' ? 'Verify OTP' : 'Create password'}</Button>{message && <p className="rounded-xl bg-muted p-3 text-sm">{message}</p>}<Link href="/admin/login" className="block text-sm font-bold text-accent-foreground underline">Return to admin login</Link></form></div>;
 }
 
-function MemberLoginPage({ onAuthenticated }: { onAuthenticated?: () => void }) {
+function AdminEmailLoginPage({ onAuthenticated }: { onAuthenticated: () => void }) {
+    const [email, setEmail] = useState('');
+    const [password, setPassword] = useState('');
+    const [rememberSession, setRememberSession] = useState(false);
+    const [message, setMessage] = useState('');
+    const [pending, setPending] = useState(false);
+
+    const submit = async (event: React.FormEvent) => {
+      event.preventDefault();
+      setPending(true);
+      setMessage('');
+      try {
+        const response = await fetch('/api/auth/admin/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ channel: 'email', identifier: email, password, rememberSession }),
+        });
+        if (response.ok) onAuthenticated();
+        else setMessage(await responseError(response, 'Invalid administrator credentials.'));
+      } catch {
+        setMessage('Unable to reach the account service. Please try again.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6">
+      <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl">
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p>
+        <h1 className="font-display text-3xl font-extrabold">Admin Portal</h1>
+        <label className="block text-sm font-bold">Email address
+          <input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <label className="block text-sm font-bold">Password
+          <input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <label className="flex items-center gap-2 text-sm font-medium">
+          <input type="checkbox" checked={rememberSession} onChange={(event) => setRememberSession(event.target.checked)} />
+          Remember Session
+        </label>
+        <Button type="submit" disabled={pending}>{pending ? 'Signing in…' : 'Sign in'}</Button>
+        <div className="flex flex-wrap justify-between gap-3 text-sm font-bold">
+          <Link href="/admin/forgot-password" className="text-accent-foreground underline">Forgot password?</Link>
+          <Link href="/admin/setup" className="text-accent-foreground underline">First-time setup</Link>
+        </div>
+        {message && <p role="status" className="rounded-xl bg-rose-50 p-3 text-sm text-rose-800">{message}</p>}
+      </form>
+    </div>;
+  }
+
+  function AdminEmailSetupPage() {
+    const [email, setEmail] = useState('');
+    const [otp, setOtp] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [verificationToken, setVerificationToken] = useState('');
+    const [step, setStep] = useState<'email' | 'otp' | 'password'>('email');
+    const [message, setMessage] = useState('');
+    const [pending, setPending] = useState(false);
+
+    const requestOtp = async () => {
+      setPending(true);
+      setMessage('');
+      try {
+        const response = await fetch('/api/auth/admin/request-otp', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ channel: 'email', identifier: email }),
+        });
+        if (!response.ok) {
+          setMessage(await responseError(response, 'Unable to send the verification code.'));
+          return;
+        }
+        setStep('otp');
+        setMessage('A verification code was sent to the configured administrator email.');
+      } catch {
+        setMessage('Unable to reach the account service. Please try again.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    const verifyOtp = async (event: React.FormEvent) => {
+      event.preventDefault();
+      setPending(true);
+      try {
+        const response = await fetch('/api/auth/admin/verify-otp', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ channel: 'email', identifier: email, otp }),
+        });
+        if (!response.ok) {
+          setMessage(await responseError(response, 'The verification code is invalid or expired.'));
+          return;
+        }
+        const payload = (await response.json()) as { verificationToken: string };
+        setVerificationToken(payload.verificationToken);
+        setStep('password');
+        setMessage('');
+      } catch {
+        setMessage('Unable to reach the account service. Please try again.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    const createPassword = async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (password !== confirmPassword) {
+        setMessage('Passwords do not match.');
+        return;
+      }
+      setPending(true);
+      try {
+        const response = await fetch('/api/auth/admin/set-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ channel: 'email', identifier: email, password, verificationToken }),
+        });
+        if (response.ok) {
+          setStep('email');
+          setPassword('');
+          setConfirmPassword('');
+          setVerificationToken('');
+          setMessage('Password created. You can now sign in.');
+        } else {
+          setMessage(await responseError(response, 'Unable to create the administrator password.'));
+        }
+      } catch {
+        setMessage('Unable to reach the account service. Please try again.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    const submit = step === 'otp' ? verifyOtp : step === 'password' ? createPassword : (event: React.FormEvent) => {
+      event.preventDefault();
+      void requestOtp();
+    };
+
+    return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6">
+      <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl">
+        <p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p>
+        <h1 className="font-display text-3xl font-extrabold">Administrator setup</h1>
+        <p className="text-sm text-muted-foreground">{step === 'email' ? 'Verify the configured administrator email address.' : step === 'otp' ? 'Enter the six-digit code sent to your email.' : 'Choose a password for administrator sign-in.'}</p>
+        {step === 'email' && <label className="block text-sm font-bold">Email address
+          <input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>}
+        {step === 'otp' && <label className="block text-sm font-bold">Verification code
+          <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>}
+        {step === 'password' && <>
+          <label className="block text-sm font-bold">New password
+            <input type="password" autoComplete="new-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+          </label>
+          <label className="block text-sm font-bold">Confirm password
+            <input type="password" autoComplete="new-password" minLength={8} required value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+          </label>
+        </>}
+        <Button type="submit" disabled={pending}>{pending ? 'Please wait…' : step === 'email' ? 'Send verification code' : step === 'otp' ? 'Verify code' : 'Create password'}</Button>
+        {message && <p role="status" className="rounded-xl bg-muted p-3 text-sm">{message}</p>}
+        <Link href="/admin/login" className="block text-sm font-bold text-accent-foreground underline">Return to admin login</Link>
+      </form>
+    </div>;
+  }
+
+  function AdminForgotPasswordPage() {
+    const [email, setEmail] = useState('');
+    const [message, setMessage] = useState('');
+    const [pending, setPending] = useState(false);
+
+    const submit = async (event: React.FormEvent) => {
+      event.preventDefault();
+      setPending(true);
+      setMessage('');
+      try {
+        const response = await fetch('/api/auth/admin/forgot-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ email }),
+        });
+        setMessage(response.ok
+          ? 'If an administrator account exists, recovery instructions have been sent.'
+          : await responseError(response, 'Unable to start password recovery.'));
+      } catch {
+        setMessage('Unable to reach the account service. Please try again.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6">
+      <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl">
+        <h1 className="font-display text-3xl font-extrabold">Admin password recovery</h1>
+        <label className="block text-sm font-bold">Email address
+          <input type="email" autoComplete="email" required value={email} onChange={(event) => setEmail(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <Button type="submit" disabled={pending}>{pending ? 'Sending…' : 'Send recovery link'}</Button>
+        {message && <p role="status" className="rounded-xl bg-muted p-3 text-sm">{message}</p>}
+        <Link href="/admin/login" className="block text-sm font-bold text-accent-foreground underline">Return to admin login</Link>
+      </form>
+    </div>;
+  }
+
+  function AdminResetPasswordPage() {
+    const [accessToken, setAccessToken] = useState('');
+    const [password, setPassword] = useState('');
+    const [confirmPassword, setConfirmPassword] = useState('');
+    const [message, setMessage] = useState('');
+    const [pending, setPending] = useState(false);
+
+    useEffect(() => {
+      const params = new URLSearchParams(window.location.hash.slice(1));
+      const token = params.get('access_token');
+      if (token && params.get('type') === 'recovery') {
+        setAccessToken(token);
+        window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+      } else {
+        setMessage('The recovery link is invalid or has expired.');
+      }
+    }, []);
+
+    const submit = async (event: React.FormEvent) => {
+      event.preventDefault();
+      if (password !== confirmPassword) {
+        setMessage('Passwords do not match.');
+        return;
+      }
+      setPending(true);
+      try {
+        const response = await fetch('/api/auth/admin/reset-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ accessToken, password }),
+        });
+        setAccessToken('');
+        setMessage(response.ok
+          ? 'Password updated. You can now sign in.'
+          : await responseError(response, 'The recovery link is invalid or has expired.'));
+      } catch {
+        setMessage('Unable to reach the account service. Please try again.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    return <div className="grid min-h-[100dvh] place-items-center bg-primary p-6">
+      <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl bg-card p-8 shadow-2xl">
+        <h1 className="font-display text-3xl font-extrabold">Set a new admin password</h1>
+        <label className="block text-sm font-bold">New password
+          <input type="password" autoComplete="new-password" minLength={12} required disabled={!accessToken} value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <label className="block text-sm font-bold">Confirm password
+          <input type="password" autoComplete="new-password" minLength={12} required disabled={!accessToken} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <Button type="submit" disabled={pending || !accessToken}>{pending ? 'Updating…' : 'Update password'}</Button>
+        {message && <p role="status" className="rounded-xl bg-muted p-3 text-sm">{message}</p>}
+        <Link href="/admin/login" className="block text-sm font-bold text-accent-foreground underline">Return to admin login</Link>
+      </form>
+    </div>;
+  }
+
+  function MemberCredentialLoginPage({ onAuthenticated }: { onAuthenticated?: () => void }) {
+    const [channel, setChannel] = useState<AuthChannel>('phone');
+    const [identifier, setIdentifier] = useState('');
+    const [password, setPassword] = useState('');
+    const [message, setMessage] = useState('');
+    const [pending, setPending] = useState(false);
+
+    const submit = async (event: React.FormEvent) => {
+      event.preventDefault();
+      setPending(true);
+      try {
+        const response = await fetch('/api/auth/member/login', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ channel, identifier, password }),
+        });
+        if (response.ok) onAuthenticated?.();
+        else setMessage(await responseError(response, 'Invalid email or mobile number or password.'));
+      } catch {
+        setMessage('Unable to reach the account service. Please try again.');
+      } finally {
+        setPending(false);
+      }
+    };
+
+    return <div className="grid min-h-[100dvh] place-items-center bg-background p-6">
+      <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl">
+        <h1 className="font-display text-3xl font-extrabold">Member sign in</h1>
+        <p className="text-sm text-muted-foreground">Sign in with Google or your email or mobile number and password.</p>
+        <GoogleSignInButton label="Continue with Google" />
+        <ChannelSelector channel={channel} onChange={(nextChannel) => { setChannel(nextChannel); setIdentifier(''); }} />
+        <label className="block text-sm font-bold">{channel === 'email' ? 'Email address' : 'Mobile number'}
+          <input type={channel === 'email' ? 'email' : 'tel'} inputMode={channel === 'phone' ? 'tel' : undefined} autoComplete={channel === 'email' ? 'email' : 'tel'} required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder={channel === 'phone' ? '01XXXXXXXXX or +8801XXXXXXXXX' : 'you@example.com'} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <label className="block text-sm font-bold">Password
+          <input type="password" autoComplete="current-password" minLength={8} required value={password} onChange={(event) => setPassword(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+        <Button type="submit" disabled={pending}>{pending ? 'Signing in…' : 'Sign in'}</Button>
+        <div className="flex flex-wrap justify-between gap-3 text-sm font-bold">
+          <Link href="/create-account" className="text-accent-foreground underline">Create account</Link>
+          <Link href="/forgot-password" className="text-accent-foreground underline">Forgot password?</Link>
+        </div>
+        {message && <p role="status" className="rounded-xl bg-muted p-3 text-sm">{message}</p>}
+        <Link href="/" className="block text-sm font-bold text-accent-foreground underline">Continue browsing books</Link>
+      </form>
+    </div>;
+  }
+
+  function MemberLoginPage({ onAuthenticated }: { onAuthenticated?: () => void }) {
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('');
@@ -376,12 +688,13 @@ function LegacyMemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
 }
 
 function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
-  const [phone, setPhone] = useState('');
+  const [channel, setChannel] = useState<AuthChannel>('phone');
+  const [identifier, setIdentifier] = useState('');
   const [otp, setOtp] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [verificationToken, setVerificationToken] = useState('');
-  const [step, setStep] = useState<'phone' | 'otp' | 'password'>('phone');
+  const [step, setStep] = useState<'identifier' | 'otp' | 'password'>('identifier');
   const [message, setMessage] = useState('');
   const [pending, setPending] = useState(false);
   const purpose = mode === 'signup' ? 'member_signup' : 'member_reset';
@@ -393,14 +706,16 @@ function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
       const response = await fetch('/api/auth/member/request-otp', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ phone, purpose }),
+        body: JSON.stringify(channel === 'email'
+          ? { channel, email: identifier, purpose }
+          : { channel, phone: identifier, purpose }),
       });
       if (!response.ok) {
         setMessage(await responseError(response, 'Unable to send the verification code.'));
         return;
       }
       setStep('otp');
-      setMessage('A verification code was sent to your mobile number.');
+      setMessage(`A verification code was sent to your ${channel === 'email' ? 'email address' : 'mobile number'}.`);
     } catch {
       setMessage('Unable to reach the account service. Please try again.');
     } finally {
@@ -416,7 +731,9 @@ function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
       const response = await fetch('/api/auth/member/verify-otp', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ phone, otp, purpose }),
+        body: JSON.stringify(channel === 'email'
+          ? { channel, email: identifier, otp, purpose }
+          : { channel, phone: identifier, otp, purpose }),
       });
       if (!response.ok) {
         setMessage(await responseError(response, 'The verification code is invalid or expired.'));
@@ -444,13 +761,15 @@ function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
       const response = await fetch('/api/auth/member/set-password', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ phone, password, verificationToken, purpose }),
+        body: JSON.stringify(channel === 'email'
+          ? { channel, email: identifier, password, verificationToken, purpose }
+          : { channel, phone: identifier, password, verificationToken, purpose }),
       });
       setMessage(response.ok
         ? mode === 'signup' ? 'Account created. You can now sign in.' : 'Password updated. You can now sign in.'
         : await responseError(response, 'Unable to save the password.'));
       if (response.ok) {
-        setStep('phone');
+        setStep('identifier');
         setOtp('');
         setPassword('');
         setConfirmPassword('');
@@ -473,17 +792,20 @@ function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
     <form onSubmit={submit} className="w-full max-w-md space-y-4 rounded-3xl border border-border bg-card p-8 shadow-xl">
       <p className="text-xs font-bold uppercase tracking-[0.22em] text-accent">Undergraduate Hub</p>
       <h1 className="font-display text-3xl font-extrabold">{title}</h1>
-      {mode === 'signup' && step === 'phone' && <>
-        <p className="text-sm text-muted-foreground">Create an account with Google or verify your mobile number.</p>
+      {mode === 'signup' && step === 'identifier' && <>
+        <p className="text-sm text-muted-foreground">Create an account with Google or verify your phone or email.</p>
         <GoogleSignInButton label="Sign up with Google" />
-        <div className="flex items-center gap-3 text-xs font-semibold text-muted-foreground"><span className="h-px flex-1 bg-border" /><span>OR USE YOUR PHONE</span><span className="h-px flex-1 bg-border" /></div>
+        <div className="flex items-center gap-3 text-xs font-semibold text-muted-foreground"><span className="h-px flex-1 bg-border" /><span>OR VERIFY WITH {channel === 'email' ? 'EMAIL' : 'PHONE'}</span><span className="h-px flex-1 bg-border" /></div>
       </>}
-      {mode === 'reset' && step === 'phone' && <p className="text-sm text-muted-foreground">Enter the mobile number linked to your account to receive a reset code.</p>}
-      {step === 'otp' && <p className="text-sm text-muted-foreground">Enter the six-digit code sent to your mobile number.</p>}
-      {step === 'password' && <p className="text-sm text-muted-foreground">Choose a password for future phone sign-ins.</p>}
-      {step === 'phone' && <label className="block text-sm font-bold">Mobile number
-        <input type="tel" inputMode="tel" autoComplete="tel" required value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="01XXXXXXXXX or +8801XXXXXXXXX" className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
-      </label>}
+      {mode === 'reset' && step === 'identifier' && <p className="text-sm text-muted-foreground">Enter the phone or email linked to your account to receive a reset code.</p>}
+      {step === 'otp' && <p className="text-sm text-muted-foreground">Enter the six-digit code sent to your {channel === 'email' ? 'email address' : 'mobile number'}.</p>}
+      {step === 'password' && <p className="text-sm text-muted-foreground">Choose a password for future {channel} sign-ins.</p>}
+      {step === 'identifier' && <>
+        <ChannelSelector channel={channel} onChange={(nextChannel) => { setChannel(nextChannel); setIdentifier(''); }} />
+        <label className="block text-sm font-bold">{channel === 'email' ? 'Email address' : 'Mobile number'}
+        <input type={channel === 'email' ? 'email' : 'tel'} inputMode={channel === 'phone' ? 'tel' : undefined} autoComplete={channel === 'email' ? 'email' : 'tel'} required value={identifier} onChange={(event) => setIdentifier(event.target.value)} placeholder={channel === 'phone' ? '01XXXXXXXXX or +8801XXXXXXXXX' : 'you@example.com'} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
+        </label>
+      </>}
       {step === 'otp' && <label className="block text-sm font-bold">Verification code
         <input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" required value={otp} onChange={(event) => setOtp(event.target.value)} className="mt-1 h-11 w-full rounded-xl border border-border bg-background px-3" />
       </label>}
@@ -496,7 +818,7 @@ function MemberPasswordFlowPage({ mode }: { mode: 'signup' | 'reset' }) {
         </label>
       </>}
       <Button type="submit" disabled={pending}>
-        {pending ? 'Please wait…' : step === 'phone' ? mode === 'signup' ? 'Send verification code' : 'Send reset code' : step === 'otp' ? 'Verify OTP' : mode === 'signup' ? 'Create account' : 'Save new password'}
+        {pending ? 'Please wait…' : step === 'identifier' ? mode === 'signup' ? 'Send verification code' : 'Send reset code' : step === 'otp' ? 'Verify OTP' : mode === 'signup' ? 'Create account' : 'Save new password'}
       </Button>
       {message && <p role="status" className="rounded-xl bg-muted p-3 text-sm">{message}</p>}
       <Link href="/login" className="block text-sm font-bold text-accent-foreground underline">Return to member login</Link>
@@ -521,9 +843,10 @@ function Router() {
   };
 
   if (location === '/auth/callback') return <GoogleAuthCallbackPage />;
-  if (location === '/admin/login') return <AdminLoginPage onAuthenticated={() => { void adminSession.refetch(); setLocation('/admin'); }} />;
-  if (location === '/admin/setup') return <AdminSetupPage />;
-  if (location === '/admin/reset-password') return <AdminSetupPage />;
+  if (location === '/admin/login') return <AdminEmailLoginPage onAuthenticated={() => { void adminSession.refetch(); setLocation('/admin'); }} />;
+  if (location === '/admin/setup') return <AdminEmailSetupPage />;
+  if (location === '/admin/forgot-password') return <AdminForgotPasswordPage />;
+  if (location === '/admin/reset-password') return <AdminResetPasswordPage />;
   if (location === '/create-account') return <MemberPasswordFlowPage mode="signup" />;
   if (location === '/forgot-password') return <MemberPasswordFlowPage mode="reset" />;
   if (isAdminRoute) {
@@ -543,7 +866,7 @@ function Router() {
   }
 
   if (isMemberRoute && !memberSession.loading && !memberSession.state?.authenticated) {
-    return <MemberLoginPage onAuthenticated={() => { void memberSession.refresh(); setLocation(location); }} />;
+    return <MemberCredentialLoginPage onAuthenticated={() => { void memberSession.refresh(); setLocation(location); }} />;
   }
 
   return <Shell adminUser={adminSession.data?.user ?? null} memberUser={memberSession.state?.user ?? null} onLogout={logout}><Switch>
@@ -556,7 +879,7 @@ function Router() {
     <Route path="/requests" component={RequestsPage} />
     <Route path="/account" component={AccountPage} />
      <Route path="/membership" component={MemberMembershipPage} />
-     <Route path="/login"><MemberLoginPage onAuthenticated={() => { void memberSession.refresh(); setLocation('/dashboard'); }} /></Route>
+    <Route path="/login"><MemberCredentialLoginPage onAuthenticated={() => { void memberSession.refresh(); setLocation('/dashboard'); }} /></Route>
     <Route component={NotFound} />
   </Switch></Shell>;
 }
@@ -689,7 +1012,23 @@ function BookCard({ book, accent }: { book: Book; accent: number }) {
 }
 
 function BookDetailPage() {
-  const { id = '' } = useParams<{ id: string }>(); const query = useGetBook(id, { query: { enabled: !!id, queryKey: getGetBookQueryKey(id) } }); const book = query.data || fallbackBooks.find((item) => item.id === id) || fallbackBooks[0]; const [showForm, setShowForm] = useState(false); const [date, setDate] = useState('2025-06-20'); const [slot, setSlot] = useState('12:00–1:00 PM'); const [note, setNote] = useState(''); const mutation = useCreateBorrowRequest(); const { toast } = useToast(); const client = useQueryClient();
+  const { id = '' } = useParams<{ id: string }>();
+  const query = useGetBook(id, { query: { enabled: !!id, queryKey: getGetBookQueryKey(id) } });
+  const book = query.data || fallbackBooks.find((item) => item.id === id) || fallbackBooks[0];
+  const [showForm, setShowForm] = useState(false);
+  const [date, setDate] = useState(() => {
+    const pickupDate = new Date();
+    pickupDate.setMinutes(pickupDate.getMinutes() - pickupDate.getTimezoneOffset());
+    return pickupDate.toISOString().slice(0, 10);
+  });
+  const [slot, setSlot] = useState('12:00–1:00 PM');
+  const [note, setNote] = useState('');
+  const mutation = useCreateBorrowRequest();
+  const { toast } = useToast();
+  const client = useQueryClient();
+  if (query.isLoading) return <LoadingBlock rows={4} />;
+  if (query.isError) return <ErrorNotice onRetry={() => query.refetch()} />;
+  if (!book) return <EmptyState title="Book not found" body="This book is not available in the catalogue." action={<Link href="/books" className="font-bold text-accent-foreground underline">Back to catalogue</Link>} />;
   const submit = () => mutation.mutate({ data: { bookId: book.id, pickupDate: date, pickupSlot: slot, note: note || null } }, { onSuccess: () => { client.invalidateQueries({ queryKey: getListBorrowRequestsQueryKey() }); client.invalidateQueries({ queryKey: getListMyBooksQueryKey() }); setShowForm(false); toast({ title: 'আপনার বই নেওয়ার অনুরোধটি পাঠানো হয়েছে', description: 'Admin অনুমোদন করলে আপনাকে জানানো হবে।' }); }, onError: (error) => toast({ title: 'অনুরোধ পাঠানো যায়নি', description: error instanceof Error ? error.message : 'Subscription, active book, deposit, বা availability check করুন।', variant: 'destructive' }) });
   return <><Link href="/books" className="mb-6 inline-flex items-center gap-2 text-sm font-bold text-muted-foreground hover:text-foreground" data-testid="link-back-books">← Back to catalogue</Link>{query.isError && <ErrorNotice onRetry={() => query.refetch()} />}<div className="grid gap-7 lg:grid-cols-[300px_1fr]"><div className="relative flex min-h-[390px] items-end overflow-hidden rounded-3xl bg-primary p-8 shadow-[0_18px_35px_hsl(187_35%_16%_/.16)]">{book.coverUrl ? <img src={book.coverUrl} alt={book.title} loading="eager" decoding="async" className="absolute inset-0 size-full object-cover opacity-90" /> : <div className="absolute inset-0 bg-[radial-gradient(circle_at_80%_12%,hsl(40_84%_62%/.42),transparent_35%)]" />}<span className="relative font-serif text-3xl font-bold leading-tight text-primary-foreground drop-shadow-md">{book.title}</span><span className="absolute right-5 top-5 rounded-lg border border-primary-foreground/20 px-2 py-1 text-[10px] font-bold uppercase tracking-widest text-primary-foreground/70">{book.language}</span></div><div className="rounded-2xl border border-border bg-card p-6 sm:p-8"><div className="flex flex-wrap items-start justify-between gap-4"><div><p className="text-xs font-bold uppercase tracking-[0.18em] text-accent">{book.category}</p><h1 className="mt-2 max-w-2xl font-display text-3xl font-extrabold tracking-tight sm:text-4xl">{book.title}</h1><p className="mt-2 text-base text-muted-foreground">{book.author}</p></div><div className="flex items-center gap-2"><StatusPill status={book.status} /><BookWishlistButton bookId={book.id} /></div></div><div className="my-7 grid gap-4 border-y border-border py-5 sm:grid-cols-3"><div><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Library code</p><p className="mt-1 font-mono text-sm font-bold">{book.qrCode}</p></div><div><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">ISBN</p><p className="mt-1 text-sm font-bold">{book.isbn || 'Not listed'}</p></div><div><p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Deposit</p><p className="mt-1 text-sm font-bold">{book.depositRequired ? `৳${book.depositAmount}` : 'Not required'}</p></div></div><h2 className="font-display text-lg font-bold">Collection details</h2><p className="mt-2 text-sm leading-relaxed text-muted-foreground">{book.conditionNote || 'এই বইটি পরিষ্কার এবং ব্যবহারযোগ্য অবস্থায় আছে। সংগ্রহের সময় স্টাফের সঙ্গে বইয়ের অবস্থা দেখে নিন।'}</p>{book.status === 'rented' && <p className="mt-4 rounded-xl bg-amber-50 p-3 text-sm font-bold text-amber-800">Currently rented. Expected return date will appear when the active transaction is updated.</p>}{!showForm ? <Button onClick={() => setShowForm(true)} disabled={book.status !== 'available'} testId="button-request-book" >{book.status === 'available' ? <><CalendarDays size={16} /> বই ধার নিন</> : 'Currently rented'}</Button> : <div className="mt-6 rounded-2xl bg-muted/65 p-4"><h3 className="font-display font-bold">Choose your collection time</h3><p className="mt-1 text-xs text-muted-foreground">স্টাফ বইটি আলাদা করে রাখবেন—আপনি কখন আসবেন জানালে সুবিধা হবে।</p><div className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-xs font-bold">Date<input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" data-testid="input-pickup-date" /></label><label className="text-xs font-bold">Time slot<select value={slot} onChange={(e) => setSlot(e.target.value)} className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm" data-testid="select-pickup-slot"><option>12:00–1:00 PM</option><option>3:00–4:00 PM</option><option>4:00–5:00 PM</option></select></label></div><label className="mt-3 block text-xs font-bold">Note (optional)<textarea value={note} onChange={(e) => setNote(e.target.value)} rows={2} placeholder="কোনো কথা জানাতে চান?" className="mt-1 w-full rounded-lg border border-border bg-background p-3 text-sm" data-testid="input-request-note" /></label><div className="mt-4 flex gap-2"><Button onClick={submit} disabled={mutation.isPending} testId="button-submit-request">{mutation.isPending ? 'Sending…' : <><Check size={16} /> Send request</>}</Button><Button variant="ghost" onClick={() => setShowForm(false)} testId="button-cancel-request">Cancel</Button></div></div>}</div></div></>;
 }

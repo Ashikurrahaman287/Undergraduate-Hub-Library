@@ -61,15 +61,19 @@ openssl rand -base64 32
 
 Never commit either value to Git.
 
-### Administrator allowlist
+### Administrator identity
 
-The server only permits administrator access for these two phone numbers:
+Set the initial administrator email. This address is the allowlisted identity for email/password login, first-time email OTP setup, and password recovery:
+
+```text
+ADMIN_INITIAL_EMAIL=admin@example.com
+```
+
+The phone-based admin allowlist remains supported for existing accounts, but the admin UI uses email and password. These variables must be present in Vercel when phone admin access is used; the `.replit` values are not copied automatically:
 
 ```text
 ADMIN_PHONE_NUMBERS=01619617036,01845278579
 ```
-
-This variable must be present in Vercel. The `.replit` value is not automatically copied to Vercel.
 
 ### Supabase authentication
 
@@ -99,13 +103,13 @@ Use the same Supabase project and public key as above. Never place `SUPABASE_SER
 
 In **Supabase → Authentication → URL Configuration**:
 
-1. Set the Site URL to the production app origin.
-2. Add `https://your-production-domain/auth/callback` to the allowed redirect URLs.
+1. Set the Site URL to `https://undergraduate-hub-library-v1-mr0mrxigz.vercel.app`.
+2. Add `https://undergraduate-hub-library-v1-mr0mrxigz.vercel.app/auth/callback` and `https://undergraduate-hub-library-v1-mr0mrxigz.vercel.app/admin/reset-password` to the allowed redirect URLs.
 3. Add each Vercel Preview callback URL that should support OAuth, plus `http://localhost:5173/auth/callback` for local development.
 
 In **Supabase → Authentication → Providers → Google**, enable Google and configure the OAuth client credentials. Copy the callback URL shown by Supabase into the authorized redirect URIs in the Google OAuth client. Supabase, not Vercel, stores the Google client secret.
 
-Member login and account creation support Google or phone number. Email is not a member authentication channel. Administrator access remains restricted to the configured phone allowlist.
+Member login, account creation, and OTP password recovery support Google, phone, or email. Administrator access requires the configured admin email and assigned admin role; existing phone-allowlisted admin identities remain supported.
 
 ### SMS verification
 
@@ -122,7 +126,7 @@ SMS_API_LABEL=transactional
 Set this to the deployed Vercel origin:
 
 ```text
-APP_ORIGIN=https://your-project.vercel.app
+APP_ORIGIN=https://undergraduate-hub-library-v1-mr0mrxigz.vercel.app
 ```
 
 After adding a custom domain, update this value to the final HTTPS domain and redeploy. The frontend and API normally share the same origin, so no frontend API URL variable is required.
@@ -132,7 +136,7 @@ After adding a custom domain, update this value to the final HTTPS domain and re
 If administrator password recovery is used, set:
 
 ```text
-ADMIN_PASSWORD_RESET_REDIRECT_URL=https://your-project.vercel.app/admin/reset-password
+ADMIN_PASSWORD_RESET_REDIRECT_URL=https://undergraduate-hub-library-v1-mr0mrxigz.vercel.app/admin/reset-password
 ```
 
 Configure the same URL in the Supabase authentication settings if Supabase requires an allowlisted redirect URL.
