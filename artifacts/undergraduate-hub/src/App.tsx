@@ -80,7 +80,7 @@ const fallbackBooks: Book[] = [];
 
 type MemberSession = {
   authenticated: boolean;
-  user: { name: string; phone: string | null; email: string | null } | null;
+  user: { userId: string; memberId: string; name: string; phone: string | null; email: string | null } | null;
 };
 
 const emptyDashboard: Dashboard = {
@@ -848,7 +848,7 @@ function Router() {
   </Switch></Shell>;
 }
 
-function Shell({ children, adminMode = false, adminUser, memberUser, onLogout }: { children: ReactNode; adminMode?: boolean; adminUser?: { email: string; name: string; role: string } | null; memberUser?: { name: string; phone: string | null; email: string | null } | null; onLogout: () => void }) {
+function Shell({ children, adminMode = false, adminUser, memberUser, onLogout }: { children: ReactNode; adminMode?: boolean; adminUser?: { email: string; name: string; role: string } | null; memberUser?: { userId: string; memberId: string; name: string; phone: string | null; email: string | null } | null; onLogout: () => void }) {
   const [mobileNav, setMobileNav] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const today = new Intl.DateTimeFormat('en-GB', {

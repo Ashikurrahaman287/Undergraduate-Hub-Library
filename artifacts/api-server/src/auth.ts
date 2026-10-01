@@ -443,7 +443,13 @@ export function memberSessionResponse(identity: MemberIdentity | null) {
   return identity
     ? {
         authenticated: true,
-        user: { name: identity.name, phone: identity.phone, email: identity.email },
+        user: {
+          userId: identity.userId,
+          memberId: identity.memberId,
+          name: identity.name,
+          phone: identity.phone,
+          email: identity.email,
+        },
       }
     : { authenticated: false, user: null };
 }
